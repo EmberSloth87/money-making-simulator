@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="A turn-based game about building passive income and reaching financial freedom. 1–8 players, pass-and-play.">
+  <title>Money Making Simulator — Race to Financial Freedom</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app"><p style="padding:2rem">Loading…</p></div>
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+  <div id="tooltip" role="tooltip" hidden></div>
+  <noscript><p style="padding:2rem">This game needs JavaScript. Please enable it and reload the page.</p></noscript>
+
+  <!-- Plain scripts (not modules) so the game also works when index.html is opened straight from disk. -->
+  <script src="js/rng.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/market.js"></script>
+  <script src="js/deals.js"></script>
+  <script src="js/events.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
