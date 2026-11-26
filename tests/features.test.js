@@ -170,14 +170,12 @@ test('property and home values drift with their neighborhoods', () => {
 });
 
 test('selling your home pays off the mortgage and makes you a renter', () => {
-  let s, p;
-  for (let g = 0; g < 50; g++) {
-    s = newGame(4, { seed: `home-${g}` });
-    p = s.players.find((x) => x.home && C.homeMortgage(x));
-    if (p) break;
-  }
-  while (C.currentPlayer(s) !== p) { E.beginTurn(s); s.pendingWin = null; E.endTurn(s, { force: true }); }
-  quietTurn(s);
+  const s = newGame(1, { seed: 'home-sale' });
+  const p = quietTurn(s);
+  p.cash = 1e6;
+  const h = s.turn.homes.find((x) => x.tier === 'starter');
+  assert.equal(E.buyHome(s, h.id, 0.2).ok, true);
+  assert.ok(C.homeMortgage(p), 'buying a home with 20% down takes out a mortgage');
   const sale = C.homeSale(s, p);
   const cash = p.cash;
   assert.equal(E.sellHome(s, 'similar').ok, true);

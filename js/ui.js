@@ -4,7 +4,7 @@
  */
 (function () {
   'use strict';
-  const { Engine: E, Core: C, Data: D, Market: M, Deals, Options: O, AI } = window.MMS;
+  const { Engine: E, Core: C, Data: D, Market: M, Deals, Options: O, AI, Trade: T } = window.MMS;
   const SAVE_KEY = 'mms.save.v1';
   const SETUP_KEY = 'mms.setup.v1';
   const $app = document.getElementById('app');
@@ -24,6 +24,7 @@
     logFilter: 'all',
     expand: {},
     opt: { sec: 'idx', kind: 'call', strike: 2, months: 3, contracts: 1 },
+    trade: null,    // the trade being put together in the Trade tab (see tradeDraft)
     botRecap: [],   // recent computer turns, each tagged with a sequence number
     recapSeen: {},  // person id → last recap sequence they've seen
     recapSeq: 0,
@@ -380,7 +381,7 @@
         <h2>How it works</h2>
         <ol class="how-list">
           <li><b>Payday every turn.</b> Collect your salary and passive income, then pay living expenses and debts.</li>
-          <li><b>Random pop-ups.</b> Deals, luxury temptations, emergencies, layoffs, promotions and charity drives appear at random — not every turn.</li>
+          <li><b>Random pop-ups.</b> Deals, luxury temptations, surprise bills, layoffs, promotions and charity drives appear at random — not every turn. Temptations come often (more often the more lavish your lifestyle), just like in real life.</li>
           <li><b>Build assets.</b> Buy stocks, real estate and businesses, pay down debt, borrow when it makes sense.</li>
           <li><b>Escape.</b> When your <em>passive</em> income reaches 2× your monthly expenses you can quit your job. First to do it wins!</li>
         </ol>
@@ -418,6 +419,7 @@
       ['market', '📈 Stocks'],
       ['options', '🎯 Options & Shorts'],
       ['portfolio', '🏠 Portfolio'],
+      ...(S.players.length > 1 ? [['trade', '🤝 Trade']] : []),
       ['debt', '💳 Debt & Budget'],
       ['standings', '🏆 Standings'],
       ['learn', '🎓 Learn'],
@@ -547,6 +549,7 @@
       case 'market': return renderMarket(p, s);
       case 'options': return renderOptions(p, s);
       case 'portfolio': return renderPortfolio(p, s);
+      case 'trade': return S.players.length > 1 ? renderTrade(p) : renderMonth(p, s);
       case 'debt': return renderDebt(p, s);
       case 'standings': return renderStandings();
       case 'learn': return renderLearn(p, s);
@@ -908,7 +911,7 @@
       const sale = C.propertySale(S, pr);
       const cf = C.propertyCashflow(pr);
       const status = pr.rehabLeft > 0 ? `<span class="badge-pill neutral">🔨 Renovating · ${plural(pr.rehabLeft, 'turn')}</span>` : pr.str ? '<span class="badge-pill neutral">Short-term rental</span>' : '';
-      return `<tr><td><b>${esc(pr.icon)} ${esc(pr.name)}</b><br>${status}<span class="muted small">Bought month ${pr.boughtRound} for ${money(pr.purchasePrice)}</span></td>
+      return `<tr><td><b>${esc(pr.icon)} ${esc(pr.name)}</b><br>${status}<span class="muted small">${pr.acquiredFrom ? `Bought from ${esc(pr.acquiredFrom)} in month ${pr.boughtRound}` : `Bought month ${pr.boughtRound} for ${money(pr.purchasePrice)}`}</span></td>
         <td class="num">${money(sale.value)}${pr.rehabLeft ? '' : `<br><span class="small ${toneOf(sale.value - pr.purchasePrice)}">${spct(sale.value / pr.purchasePrice - 1)} since bought</span>`}</td><td class="num">${pr.mortgage ? money(pr.mortgage.balance) : '—'}</td><td class="num">${money(sale.value - sale.loan)}</td>
         <td class="num">${pr.land ? '—' : money(pr.rehabLeft ? 0 : pr.rent)}</td><td class="num">−${money(pr.rehabLeft ? Math.round(pr.opex * 0.5) : pr.opex)}${pr.mortgage ? `<br><span class="muted small">−${money(pr.mortgage.payment)} mortgage</span>` : ''}</td>
         <td class="num ${toneOf(cf)}"><b>${signed(cf)}</b></td>
@@ -952,6 +955,113 @@
       ${table('🚀 Startup investments', ['Company', 'Invested', 'Outcome in', ''], startups)}
       ${table('📜 Lending notes', ['Note', 'Principal', 'Rate', 'Interest', 'Matures in', ''], notes)}
       ${table('💎 Collectibles', ['Item', 'Paid', 'Est. value', 'Upkeep', ''], coll)}`;
+  }
+
+  // ---------------------------------------------------------------- Trade (multiplayer)
+  /** The trade being built this turn; starts fresh every turn. Keys are "kind:id"; stock values are share counts. */
+  function tradeDraft(p) {
+    const key = `${S.round}:${p.id}`;
+    if (!ui.trade || ui.trade.key !== key) ui.trade = { key, to: null, give: {}, get: {}, giveCash: 0, getCash: 0 };
+    const partners = S.players.filter((x) => x.id !== p.id && !x.finished);
+    if (!partners.some((x) => x.id === ui.trade.to)) {
+      ui.trade.to = partners.length ? partners[0].id : null;
+      ui.trade.get = {};
+      ui.trade.getCash = 0;
+    }
+    return ui.trade;
+  }
+
+  function tradeOffer(p) {
+    const t = tradeDraft(p);
+    const side = (sel, cash) => ({
+      cash: Math.max(0, Number(cash) || 0),
+      items: Object.entries(sel).filter(([, v]) => v).map(([k, v]) => {
+        const i = k.indexOf(':');
+        const kind = k.slice(0, i), id = k.slice(i + 1);
+        return kind === 'stock' ? { kind, id, shares: Math.floor(Number(v) || 0) } : { kind, id };
+      }).filter((it) => it.kind !== 'stock' || it.shares > 0)
+    });
+    return { from: p.id, to: t.to, give: side(t.give, t.giveCash), get: side(t.get, t.getCash) };
+  }
+
+  const ASSET_KIND_LABELS = { property: 'Real estate', business: 'Businesses & startups', note: 'Lending notes', collectible: 'Collectibles', stock: 'Stocks' };
+
+  function assetMeta(a) {
+    const bits = [`worth ${money(a.value)}`];
+    if (a.loan > 0) bits.push(`<span class="neg">${money(a.loan)} loan comes with it</span>`);
+    if (Math.abs(a.cashflow) >= 0.5) bits.push(`<span class="${toneOf(a.cashflow)}">${signed(a.cashflow)}/mo</span>`);
+    if (a.note) bits.push(esc(a.note));
+    return bits.join(' · ');
+  }
+
+  /** One column of the trade builder: everything `owner` could put in, plus cash. */
+  function tradeColumn(owner, sideId, sel, cash, title) {
+    const assets = T.tradeableAssets(S, owner);
+    const groups = Object.keys(ASSET_KIND_LABELS).map((kind) => {
+      const rows = assets.filter((a) => a.kind === kind).map((a) => {
+        const key = `${a.kind}:${a.id}`;
+        if (a.kind === 'stock') {
+          const v = sel[key] || '';
+          return `<div class="trade-item"><span class="ti-name">${esc(a.icon)} <b>${esc(a.ticker)}</b> <span class="muted small">${money(a.price, 2)}/share · ${esc(a.note)} · ${money(a.value)}</span></span>
+            <span class="ti-qty"><input type="number" class="qty" min="0" max="${a.maxShares}" step="1" value="${esc(v)}" placeholder="0" data-trade-side="${sideId}" data-key="${esc(key)}" aria-label="Shares of ${esc(a.ticker)} to trade"><span class="muted small">shares</span></span></div>`;
+        }
+        return `<label class="trade-item"><input type="checkbox" ${sel[key] ? 'checked' : ''} data-trade-side="${sideId}" data-key="${esc(key)}">
+          <span class="ti-name">${esc(a.icon)} <b>${esc(a.name)}</b><br><span class="muted small">${assetMeta(a)}</span></span>
+          <b class="num">${money(a.equity)}</b></label>`;
+      }).join('');
+      return rows ? `<div class="trade-group"><div class="eyebrow">${ASSET_KIND_LABELS[kind]}</div>${rows}</div>` : '';
+    }).join('');
+    return `<div class="card"><h3>${title}</h3>
+      ${groups || '<p class="muted">No assets to trade yet.</p>'}
+      <div class="trade-item trade-cash"><span class="ti-name">💵 <b>Cash</b> <span class="muted small">(has ${money(owner.cash)})</span></span>
+        <span class="ti-qty">$<input type="number" class="qty wide" min="0" step="100" value="${Number(cash) || ''}" placeholder="0" data-trade-side="${sideId}" data-key="cash" aria-label="Cash"></span></div>
+    </div>`;
+  }
+
+  function tradeSummaryHtml(p) {
+    const offer = tradeOffer(p);
+    const d = T.describe(S, offer);
+    const other = C.getPlayer(S, offer.to);
+    if (!other) return '';
+    const empty = !offer.give.items.length && !offer.get.items.length && !offer.give.cash && !offer.get.cash;
+    if (empty) return `<p class="muted">Tick the assets you'd give and the ones you'd like from ${esc(other.name)}, then add cash on either side to set the price.</p>`;
+    const g = d.give, r = d.get;
+    const loansIn = r ? r.loan : 0, loansOut = g ? g.loan : 0;
+    const rows = g && r ? `<div class="kv-grid">
+        ${kv('You give (market value)', money(g.equity + g.cash), '', 'Assets at today\'s market value minus any loan that goes with them, plus cash.')}
+        ${kv('You get (market value)', money(r.equity + r.cash))}
+        ${kv('Net for you at market value', signed(d.netValue), toneOf(d.netValue), 'Positive means you get more than you give, judged at market prices. A trade can still make sense if it fits your plan — e.g. swapping a growth stock for a rental that pays every month.')}
+        ${kv('Your monthly cashflow', `${signed(d.netCashflow)}/mo`, toneOf(d.netCashflow), 'Passive income you gain minus passive income you give up. Only passive income counts toward freedom.')}
+        ${loansIn ? kv('Loans you take over', money(loansIn), 'neg') : ''}${loansOut ? kv('Loans you hand off', money(loansOut), 'pos') : ''}
+        ${kv('Your cash after', money(p.cash - g.cash + r.cash))}</div>` : '';
+    const warn = d.ok && d.netValue < -1000 ? `<div class="note">⚠️ At market value you'd be giving away ${money(-d.netValue)} more than you get.</div>` : '';
+    const asks = (S.turn && S.turn.tradeAsks && S.turn.tradeAsks[other.id]) || 0;
+    const botNote = other.bot ? `<p class="muted small">🤖 ${esc(other.name)} is a computer opponent (${esc(botLevel(other).name)}) and answers right away. It only agrees to trades that leave it better off. Offers left this month: ${Math.max(0, E.MAX_BOT_OFFERS - asks)}.</p>`
+      : `<p class="muted small">${esc(other.name)} will be asked to accept or decline on this device.</p>`;
+    return `${rows}${warn}${d.ok ? '' : `<div class="note">${esc(d.reason)}</div>`}${botNote}
+      <div class="btn-row"><button class="btn primary" data-action="trade-propose" ${d.ok ? '' : 'disabled'}>Offer this trade to ${esc(other.name)}</button>
+      <button class="btn ghost" data-action="trade-clear">Clear</button></div>`;
+  }
+
+  function updateTradeSummary() {
+    const el = document.getElementById('trade-summary');
+    if (el && S && S.turn) el.innerHTML = tradeSummaryHtml(C.currentPlayer(S));
+  }
+
+  function renderTrade(p) {
+    const lesson = '<div class="lesson">💡 <b>Every trade has two sides.</b> A fair price is whatever both people agree on, but judge it by what it does to <i>your</i> plan: how much passive income you gain or give up, any loan you take over, and how much cash you have left for the next deal. Market value is only a starting point — an asset can be worth more to someone who needs its cashflow.</div>';
+    if (!(S.phase === 'turn' && C.currentPlayer(S).id === p.id && !p.finished)) {
+      return `<div class="card"><h3>🤝 Trade with other players</h3><p class="muted">You can offer trades during your own turn.</p>${lesson}</div>`;
+    }
+    const t = tradeDraft(p);
+    const partners = S.players.filter((x) => x.id !== p.id && !x.finished);
+    if (!partners.length) return `<div class="card"><h3>🤝 Trade with other players</h3><p class="muted">Everyone else has reached financial freedom, so there's no one left to trade with.</p></div>`;
+    const other = C.getPlayer(S, t.to);
+    return `<div class="card"><div class="card-head"><h3>🤝 Trade with</h3>
+        <div class="seg-control" role="group" aria-label="Trade partner">${partners.map((x) => `<button class="btn sm ${x.id === t.to ? 'primary' : 'ghost'}" data-action="trade-to" data-id="${x.id}" aria-pressed="${x.id === t.to}">${esc(x.emoji)} ${esc(x.name)}${x.bot ? ' 🤖' : ''}</button>`).join('')}</div></div>
+        <p class="muted small">Put in any mix of assets and cash on either side — you set the price. Your home, options and short positions can't be traded.</p></div>
+      <div class="grid-2">${tradeColumn(p, 'give', t.give, t.giveCash, `You give (${esc(p.emoji)} ${esc(p.name)})`)}${tradeColumn(other, 'get', t.get, t.getCash, `You get (${esc(other.emoji)} ${esc(other.name)})`)}</div>
+      <div class="card"><h3>📋 The deal</h3><div id="trade-summary">${tradeSummaryHtml(p)}</div>${lesson}</div>`;
   }
 
   // ---------------------------------------------------------------- Housing (the home you live in)
@@ -1236,6 +1346,32 @@
     };
   }
 
+  /** A person was offered a trade: they accept or decline on the shared device. */
+  function tradeModal() {
+    const t = S.turn.pendingTrade;
+    const d = T.describe(S, t);
+    const from = C.getPlayer(S, t.from), to = C.getPlayer(S, t.to);
+    if (!d.ok) {
+      return { title: 'Trade offer', icon: '🤝', dismissible: false, body: `<p>This offer can't go through anymore: ${esc(d.reason)}</p>`,
+        footer: '<button class="btn primary" data-action="trade-decline">OK</button>' };
+    }
+    const v = T.perspective(d, to.id);
+    const list = (side) => {
+      const items = side.items.map((a) => `<li>${esc(a.icon)} <b>${esc(a.kind === 'stock' ? `${a.shares.toLocaleString('en-US')} shares of ${a.ticker}` : a.name)}</b><br><span class="muted small">${a.kind === 'stock' ? `worth ${money(a.value)}${a.cashflow >= 0.5 ? ` · ${signed(a.cashflow)}/mo` : ''}` : assetMeta(a)}</span></li>`);
+      if (side.cash > 0) items.push(`<li>💵 <b>${money(side.cash)}</b> cash</li>`);
+      return items.length ? `<ul class="trade-list">${items.join('')}</ul>` : '<p class="muted">Nothing</p>';
+    };
+    return {
+      title: `Trade offer for ${to.name}`, icon: '🤝', wide: true, dismissible: false, tone: 'neutral',
+      body: `<div class="handoff-note" style="--pc:${to.color}">📱 Pass the device to <b>${esc(to.emoji)} ${esc(to.name)}</b>. ${esc(from.emoji)} ${esc(from.name)} is offering you a trade.</div>
+        <div class="grid-2 trade-sides"><div><h4>You'd give</h4>${list(v.gives)}</div><div><h4>You'd get</h4>${list(v.gets)}</div></div>
+        <div class="kv-grid">${kv('Net for you at market value', signed(v.netValue), toneOf(v.netValue))}${kv('Your monthly cashflow', `${signed(v.netCashflow)}/mo`, toneOf(v.netCashflow))}
+          ${v.gets.loan ? kv('Loans you\'d take over', money(v.gets.loan), 'neg') : ''}${kv('Your cash after', money(to.cash - v.gives.cash + v.gets.cash))}</div>
+        <div class="lesson">💡 Judge an offer by what it does to <i>your</i> passive income and net worth — not by how good it sounds. Any loan on an asset you receive becomes yours to repay.</div>`,
+      footer: `<button class="btn ghost" data-action="trade-decline">Decline</button><button class="btn primary" data-action="trade-accept">Accept trade</button>`
+    };
+  }
+
   function winModal() {
     const p = C.getPlayer(S, S.pendingWin);
     const s = C.summarize(S, p);
@@ -1301,20 +1437,21 @@
         <h3>🔁 A turn</h3><ol>
           <li><b>Payday.</b> You collect your salary (unless you've been downsized) plus all passive income, then pay living expenses and debt payments. If you can't cover your bills, the shortfall goes on a credit card.</li>
           <li><b>Pop-ups.</b> Random events appear — not every turn: deals, luxury temptations, emergencies, layoffs (1–6 turns without pay), raises and promotions, side gigs, buyer offers, networking invitations, dates and family news, charity drives — plus announcements when a startup you backed succeeds or fails.</li>
-          <li><b>Act.</b> Buy deals, trade stocks, pay off debt, borrow from the bank, sell assets or downshift your lifestyle — as much as you like.</li>
+          <li><b>Act.</b> Buy deals, trade stocks, pay off debt, borrow from the bank, sell assets, trade with other players or downshift your lifestyle — as much as you like.</li>
           <li><b>End your turn</b> and pass the device. When everyone has played, the month ends and the market moves.</li></ol>
-        <h3>💼 Your starting life</h3><p>Each player gets a random job (salary), lifestyle (expenses), savings and a mix of debts — credit cards, auto loans, student loans, a mortgage and more. Paying a debt off removes its monthly payment, which lowers your expenses <i>and</i> your freedom target.</p>
+        <h3>💼 Your starting life</h3><p>Each player gets a random job (salary), lifestyle (expenses), savings and a mix of debts — credit cards, auto loans, personal loans and more. Everyone starts out <b>renting</b>; you can buy a home later. Jobs that need a college degree (teacher, nurse, accountant, engineer…) always come with <b>student loans</b> of roughly $22k–$38k, and graduate school multiplies that: lawyers owe about 3×, pharmacists 3.5×, dentists 4× and doctors — after about 6 more years of medical school and training — about 5×. Paying a debt off removes its monthly payment, which lowers your expenses <i>and</i> your freedom target.</p>
         <h3>💰 Ways to make money</h3><ul>
           <li><b>Stocks</b> — 12 fictional investments, from a steady index fund and bonds to big tech, AI, healthcare, a grocery chain, energy, a REIT, gold, crypto and a penny stock. Each has its own volatility, and only dividends count as passive income.</li>
           <li><b>Real estate</b> — condos, houses, duplexes, triplexes and fourplexes, apartment complexes, vacation rentals, fixer-uppers, commercial buildings and land. Most use a mortgage; check the cashflow after all costs.</li>
           <li><b>Businesses</b> — vending routes, ATMs, food trucks, laundromats, franchises, partnerships and more. Some take a few turns to launch before you see their real profit.</li>
           <li><b>Side projects, startups, lending notes and collectibles</b> — from cheap lottery tickets to steady interest.</li></ul>
-        <h3>🏡 Your home</h3><p>Homes rise and fall in value with the regional housing market <i>and</i> their own neighborhood. Homeowners can sell (6% selling costs, then the mortgage is repaid) and move into a rental — or buy one of the homes listed each turn in the Portfolio tab. Buying needs a down payment (5–20%) plus 3% closing costs, and the bank caps all your debt payments at 43% of your income.</p>
+        <h3>🤝 Trading with other players</h3><p>In a game with more than one player, the <b>Trade</b> tab lets you offer a deal to anyone still in the race: put in any mix of your rentals, land, businesses, startup stakes, lending notes, collectibles, shares of stock and cash, ask for any of theirs, and set the price yourselves. Any mortgage or loan on an asset goes with it. A person accepts or declines on the shared device; a computer opponent answers right away and only says yes to trades that leave it better off.</p>
+        <h3>🏡 Your home</h3><p>Everyone starts as a renter. Homes rise and fall in value with the regional housing market <i>and</i> their own neighborhood. Buy one of the homes listed each turn in the Portfolio tab; homeowners can later sell (6% selling costs, then the mortgage is repaid) and move back into a rental. Buying needs a down payment (5–20%) plus 3% closing costs, and the bank caps all your debt payments at 43% of your income.</p>
         <h3>📈 Raises &amp; 🤝 networking</h3><p>Raises are small, permanent bumps in pay (2–5%); promotions are bigger (8–20%) and come with a new title. Networking conferences (a one-time fee, helps for 12 months) and networking clubs (a joining fee plus monthly dues, cancel any time) make raises, promotions and side gigs more likely and cut the longest possible job search after a layoff from 6 months to 4 (one of them) or 2 (both).</p>
-        <h3>💞 Relationships</h3><p>Everyone starts single. You may meet someone and start dating (dates cost money each month). After a while, you may get the chance to marry — with a big wedding paid in cash or financed, or a simple one. A spouse pays half of the household bills. Married couples may decide to have children (each parent pays half), and marriages can hit trouble: counseling often helps, but a divorce costs legal fees plus half your cash and stocks. Dating couples can also simply break up.</p>
+        <h3>💞 Relationships</h3><p>Everyone starts single. You may meet someone and start dating (dates cost money each month). After a while, you may get the chance to marry — with a big wedding paid in cash or financed, or a simple one. A spouse pays half of the household bills. Married couples may decide to have children (each parent pays half), and marriages can hit trouble: counseling often helps, but a divorce costs legal fees plus half your cash and stocks. Dating couples break up fairly often — more so if you keep putting off marriage — while married couples talk about having a baby often.</p>
         <h3>🎯 Options &amp; short selling</h3><p>In the Options &amp; Shorts tab you can buy <b>calls</b> (bet on a rise), <b>puts</b> (bet on a fall, or insure shares you own) and <b>straddles</b> (bet on a big move either way). One contract covers 100 shares; options expire in 1, 3 or 6 months and pay out automatically at that month's payday if they finish in the money. <b>Short selling</b> borrows shares to sell now and buy back later: you need a 50% margin deposit, pay monthly borrow fees and dividends, and get a forced buy-back (margin call) if the price rises about 15%.</p>
         <h3>🤖 Computer opponents</h3><p>Playing alone? Add computer opponents on the setup screen. They follow exactly the same rules and get their own random cards. <b>Easy</b> bots spend freely and chase hot tips, <b>Normal</b> bots save steadily and buy solid deals, and <b>Hard</b> bots run a disciplined investor playbook. Their turns are played instantly; your payday screen shows what they did since your last turn.</p>
-        <h3>😇 Charity</h3><p>Sometimes a charity drive asks for 10% of your monthly income. Donating gives you good karma for 3 turns: better deals, more good events, fewer bad ones, and lower odds of being downsized.</p>
+        <h3>😇 Charity</h3><p>Sometimes a charity drive asks for 10% of your monthly income — and if you've been laid off, 10% of the salary you'd normally earn. Donating gives you good karma for 3 turns: better deals, more good events, fewer bad ones, and lower odds of being downsized.</p>
         <h3>🏦 The bank</h3><p>You can borrow in $1,000 steps as long as the payment fits within 60% of your monthly cashflow. Borrowed money raises your expenses (and freedom target), so use it for assets that pay more than they cost.</p>
         <h3>🧠 Tips</h3><ul><li>Kill high-interest credit-card debt early — it's a guaranteed return.</li><li>Keep an emergency fund so layoffs and emergencies don't snowball into debt.</li><li>Look for deals with strong cash-on-cash returns and positive cashflow.</li><li>Growth stocks don't pay your bills; sell winners and buy income-producing assets.</li><li>Watch the <b>Money coach</b> in the This Month tab and the <b>Learn</b> tab.</li></ul>
         <p class="muted small">All companies and events are fictional. This is an educational game, not financial advice.</p></div>`,
@@ -1349,6 +1486,7 @@
     if (S.phase === 'handoff') return { type: 'handoff', auto: true };
     if (S.phase === 'victory' || S.phase === 'gameover') return { type: 'results', auto: true };
     if (ui.showPayday) return { type: 'payday', auto: true };
+    if (S.turn && S.turn.pendingTrade) return { type: 'trade', auto: true };
     if (S.pendingWin) return { type: 'win', auto: true };
     const c = S.turn && S.turn.cards.find((x) => !x.seen);
     if (c) return { type: 'card', cardId: c.id, auto: true };
@@ -1369,6 +1507,7 @@
         if (!c) { ui.modal = null; return renderModal(); }
         spec = cardModal(c); break;
       }
+      case 'trade': spec = tradeModal(); break;
       case 'win': spec = winModal(); break;
       case 'results': spec = resultsModal(); break;
       case 'rules': spec = rulesModal(); break;
@@ -1643,6 +1782,34 @@
       confirmModal('Cancel your membership?', `<p>You'll stop paying ${money(club.dues)}/mo in dues, but lose the networking boost. The joining fee is not refunded — if you rejoin later, you'd pay it again.</p>`, 'Cancel membership', () => after(E.cancelClub(S)));
       refresh();
     },
+    'trade-to'(el) {
+      const t = tradeDraft(C.currentPlayer(S));
+      t.to = el.dataset.id; t.get = {}; t.getCash = 0;
+      refresh();
+    },
+    'trade-clear'() { ui.trade = null; refresh(); },
+    'trade-propose'() {
+      const r = E.proposeTrade(S, tradeOffer(C.currentPlayer(S)));
+      if (!r.ok) return after(r);
+      if (r.accepted) ui.trade = null;
+      ui.modal = null;
+      if (!r.pending) toast(r.msg, r.accepted ? 'good' : '');
+      save();
+      refresh();
+    },
+    'trade-accept'() {
+      const r = E.answerTrade(S, true);
+      if (r.ok) ui.trade = null;
+      ui.modal = null;
+      after(r);
+    },
+    'trade-decline'() {
+      const r = E.answerTrade(S, false);
+      ui.modal = null;
+      toast(r.msg, '');
+      save();
+      refresh();
+    },
     'chart-metric'(el) { ui.chartMetric = el.dataset.metric; refresh(); },
     'log-filter'(el) { ui.logFilter = el.dataset.filter; refresh(); },
     claim() { E.claimFreedom(S); ui.modal = null; save(); refresh(); },
@@ -1679,8 +1846,19 @@
     if (fn) { e.preventDefault(); fn(el, e); }
   });
 
+  /** Trade-builder fields update the draft and its summary in place (no re-render, so focus stays put). */
+  function tradeInput(t) {
+    if (!t.dataset || !t.dataset.tradeSide || !ui.trade) return false;
+    const side = t.dataset.tradeSide, key = t.dataset.key;
+    if (key === 'cash') ui.trade[side === 'give' ? 'giveCash' : 'getCash'] = Math.max(0, Number(t.value) || 0);
+    else ui.trade[side][key] = t.type === 'checkbox' ? t.checked : Math.max(0, Math.floor(Number(t.value) || 0));
+    updateTradeSummary();
+    return true;
+  }
+
   document.addEventListener('input', (e) => {
     const t = e.target;
+    if (tradeInput(t)) return;
     if (t.id === 'opt-contracts') {
       // Live-update the order ticket without re-rendering (so the Buy button keeps working).
       const n = Math.max(0, Math.floor(Number(t.value) || 0));
@@ -1700,6 +1878,7 @@
 
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (tradeInput(t)) return;
     if (t.dataset.setup) { ui.setup[t.dataset.setup] = t.type === 'checkbox' ? t.checked : t.value; saveSetup(); }
     if (t.classList.contains('ptype')) {
       const i = Number(t.dataset.i), pl = ui.setup.players[i];

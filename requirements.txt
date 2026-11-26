@@ -1,0 +1,14 @@
+# Money Making Simulator - Python requirements
+#
+# Running the game locally needs NO third-party packages. The game runs in the
+# browser, and wsgi.py serves it using only the Python 3 standard library:
+#
+#     python3 wsgi.py          # then open http://localhost:8080
+#
+# So `pip install -r requirements.txt` is safe to run, but installs nothing.
+#
+# Optional: a production WSGI server, only if you want to deploy it (see README).
+# Uncomment ONE, then run `pip install -r requirements.txt`:
+#
+# gunicorn     # Linux / macOS:  gunicorn -b 0.0.0.0:8080 wsgi:application
+# waitress     # Windows or anywhere:  waitress-serve --port=8080 wsgi:application

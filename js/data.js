@@ -6,7 +6,13 @@
   'use strict';
   const MMS = global.MMS || (global.MMS = {});
 
-  // Monthly take-home pay ranges. `student` = chance of starting with student loans.
+  /*
+   * Monthly take-home pay ranges.
+   *   degree   schooling the job typically requires (see DEGREES). Anyone dealt one of these jobs
+   *            always starts with student loans sized to that schooling.
+   *   student  for jobs that don't need a degree: the chance of starting with smaller loans
+   *            from some college or trade school.
+   */
   const JOBS = [
     { title: 'Barista', icon: '☕', salary: [2100, 2700], student: 0.25 },
     { title: 'Retail Associate', icon: '🛍️', salary: [2200, 2900], student: 0.2 },
@@ -18,23 +24,39 @@
     { title: 'Auto Mechanic', icon: '🔧', salary: [3500, 4600], student: 0.15 },
     { title: 'Electrician', icon: '⚡', salary: [4400, 6000], student: 0.15 },
     { title: 'Plumber', icon: '🚰', salary: [4200, 5800], student: 0.1 },
-    { title: 'Teacher', icon: '🍎', salary: [3500, 4700], student: 0.75 },
-    { title: 'Social Worker', icon: '🤝', salary: [3300, 4200], student: 0.8 },
+    { title: 'Teacher', icon: '🍎', salary: [3500, 4700], degree: 'bachelor' },
+    { title: 'Social Worker', icon: '🤝', salary: [3300, 4200], degree: 'bachelor' },
     { title: 'Police Officer', icon: '👮', salary: [4500, 5800], student: 0.3 },
     { title: 'Firefighter', icon: '🚒', salary: [4300, 5600], student: 0.25 },
-    { title: 'Registered Nurse', icon: '🩺', salary: [5400, 7000], student: 0.7 },
-    { title: 'Accountant', icon: '🧮', salary: [5000, 6600], student: 0.65 },
-    { title: 'Graphic Designer', icon: '🎨', salary: [3700, 5000], student: 0.6 },
-    { title: 'Marketing Manager', icon: '📣', salary: [6000, 8000], student: 0.55 },
-    { title: 'Civil Engineer', icon: '🏗️', salary: [6400, 8400], student: 0.65 },
-    { title: 'Software Engineer', icon: '💻', salary: [8500, 12000], student: 0.5 },
-    { title: 'Data Scientist', icon: '📊', salary: [8000, 11000], student: 0.6 },
-    { title: 'Pharmacist', icon: '💊', salary: [8400, 10400], student: 0.9 },
+    { title: 'Registered Nurse', icon: '🩺', salary: [5400, 7000], degree: 'bachelor' },
+    { title: 'Accountant', icon: '🧮', salary: [5000, 6600], degree: 'bachelor' },
+    { title: 'Graphic Designer', icon: '🎨', salary: [3700, 5000], degree: 'bachelor' },
+    { title: 'Marketing Manager', icon: '📣', salary: [6000, 8000], degree: 'bachelor' },
+    { title: 'Civil Engineer', icon: '🏗️', salary: [6400, 8400], degree: 'bachelor' },
+    { title: 'Software Engineer', icon: '💻', salary: [8500, 12000], degree: 'bachelor' },
+    { title: 'Data Scientist', icon: '📊', salary: [8000, 11000], degree: 'bachelor' },
+    { title: 'Pharmacist', icon: '💊', salary: [8400, 10400], degree: 'pharmacy' },
     { title: 'Airline Pilot', icon: '✈️', salary: [9000, 14000], student: 0.4 },
-    { title: 'Lawyer', icon: '⚖️', salary: [9000, 14500], student: 0.95 },
-    { title: 'Dentist', icon: '🦷', salary: [10500, 15000], student: 0.95 },
-    { title: 'Doctor', icon: '🩻', salary: [13000, 19000], student: 0.95 }
+    { title: 'Lawyer', icon: '⚖️', salary: [9000, 14500], degree: 'law' },
+    { title: 'Dentist', icon: '🦷', salary: [10500, 15000], degree: 'dental' },
+    { title: 'Doctor', icon: '🩻', salary: [13000, 19000], degree: 'medical' }
   ];
+
+  /*
+   * Student loans. A bachelor's degree leaves a typical graduate owing UNDERGRAD_LOAN; graduate and
+   * professional schools stack more years of tuition on top (`loanMult` × the undergrad loan).
+   * Doctors spend about 6 more years in medical school and training, so they owe about 5×.
+   * Jobs without a degree requirement that start with loans owe SOME_COLLEGE_LOAN × UNDERGRAD_LOAN.
+   */
+  const UNDERGRAD_LOAN = [22000, 38000];
+  const SOME_COLLEGE_LOAN = [0.2, 0.5];
+  const DEGREES = {
+    bachelor: { label: 'bachelor\'s degree', loanMult: 1, extraYears: 0 },
+    law: { label: 'law school', loanMult: 3, extraYears: 3 },
+    pharmacy: { label: 'pharmacy school', loanMult: 3.5, extraYears: 4 },
+    dental: { label: 'dental school', loanMult: 4, extraYears: 4 },
+    medical: { label: 'medical school', loanMult: 5, extraYears: 6 }
+  };
 
   // Title prefixes earned through promotions.
   const JOB_LEVELS = ['', 'Senior ', 'Lead ', 'Head '];
@@ -188,11 +210,27 @@
     { icon: '👗', title: 'Wardrobe refresh', text: 'Nothing in your closet "sparks joy" anymore.', cost: [1000, 3500] },
     { icon: '☕', title: 'Fancy espresso machine', text: 'It will pay for itself in lattes. Eventually.', cost: [600, 1800] },
     { icon: '🛁', title: 'Backyard hot tub', text: 'The neighbors got one, so…', cost: [4000, 9000], homeowner: true },
-    { icon: '🎿', title: 'Ski trip with friends', text: 'Lift tickets, lodge, rentals and après-ski.', cost: [1200, 3500] }
+    { icon: '🎿', title: 'Ski trip with friends', text: 'Lift tickets, lodge, rentals and après-ski.', cost: [1200, 3500] },
+    { icon: '✈️', title: 'Two weeks in Europe', text: 'Paris, Rome, Barcelona: flights, hotels, trains and far too many gelatos.', cost: [3000, 7500] },
+    { icon: '🏝️', title: 'All-inclusive beach getaway', text: 'You saw the photos on social media and booked it that night.', cost: [1800, 4500] },
+    { icon: '🏕️', title: 'Long weekend road trip', text: 'Gas, motels, national park passes and roadside diners add up fast.', cost: [500, 1400] },
+    { icon: '💻', title: 'New laptop and tablet', text: 'The old laptop still works, but the new one is so thin.', cost: [1500, 3200] },
+    { icon: '🎧', title: 'Smartwatch and noise-cancelling headphones', text: 'Two gadgets you didn\'t need until the ad told you that you did.', cost: [600, 1400] },
+    { icon: '🛍️', title: 'Online shopping spree', text: 'One-click checkout and a "limited-time" sale: the boxes keep arriving.', cost: [400, 1500] },
+    // A car is a temptation that keeps costing: a down payment now plus a new monthly loan payment.
+    { icon: '🚗', title: 'New-car fever', text: 'Your car is finally paid off, so naturally you test-drove a brand-new one. And bought it.', cost: [2000, 5000], carLoan: true }
   ];
 
-  // Unexpected expenses (forced — pay cash or charge it).
+  // Unexpected expenses (forced — pay cash or charge it). Some only hit people who own the
+  // liability behind them: a home (`homeowner`), children (`kids`) or a boat (`boat`).
   const EMERGENCIES = [
+    { icon: '🛞', title: 'New tires and brakes', text: 'Your mechanic says the tires are bald and the brakes are shot.', cost: [700, 1800] },
+    { icon: '🚘', title: 'Fender-bender', text: 'Someone backed into you in a parking lot, and you owe the insurance deductible.', cost: [500, 1500] },
+    { icon: '👓', title: 'New glasses', text: 'Your prescription changed, and insurance only covers part of the new frames.', cost: [250, 700] },
+    { icon: '❄️', title: 'Furnace replacement', text: 'The furnace died in the middle of winter.', cost: [3000, 8000], homeowner: true },
+    { icon: '🪥', title: 'Braces for your kid', text: 'The orthodontist says your child needs braces.', cost: [2500, 6000], kids: true },
+    { icon: '🩹', title: 'Broken arm at the playground', text: 'An ER visit, a cast and three follow-up appointments.', cost: [800, 3000], kids: true },
+    { icon: '🛥️', title: 'Boat engine repair', text: 'The outboard motor seized up — and boat mechanics aren\'t cheap.', cost: [1500, 5000], boat: true },
     { icon: '🚗', title: 'Car trouble', text: 'Your transmission gave out on the highway.', cost: [600, 3200] },
     { icon: '🏥', title: 'Medical bill', text: 'An unexpected trip to the ER. Insurance covered some of it…', cost: [500, 4500] },
     { icon: '🦷', title: 'Dental work', text: 'You need a root canal and a crown.', cost: [900, 2800] },
@@ -367,7 +405,7 @@
   const COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767'];
 
   MMS.Data = {
-    JOBS, JOB_LEVELS, LIFESTYLES, EXPENSES, DEBT_TYPES, CAR_TYPES, CARD_NAMES,
+    JOBS, DEGREES, UNDERGRAD_LOAN, SOME_COLLEGE_LOAN, JOB_LEVELS, LIFESTYLES, EXPENSES, DEBT_TYPES, CAR_TYPES, CARD_NAMES,
     SECURITIES, PENNY_RELISTS, NEWS, LUXURIES, EMERGENCIES, SIDE_GIGS,
     SELLER_STORIES, BIZ_STORIES, DEALS, STOCK_TIPS, AVATARS, COLORS,
     PARTNER_NAMES, PARTNER_EMOJI, MEET_STORIES, BREAKUP_STORIES, CONFERENCES, CLUBS, HOME_LISTINGS, NEIGHBORHOOD_NEWS

@@ -304,19 +304,20 @@
 
   // ---------------------------------------------------------------- player creation
   function newRelationship() {
-    return { status: 'single', partner: null, since: 0, datingCost: 0, declined: 0, lastBabyAsk: -99, breakups: 0, marriages: 0, divorces: 0 };
+    return { status: 'single', partner: null, since: 0, datingCost: 0, declined: 0, lastBabyAsk: -99, nextBabyAsk: 0, breakups: 0, marriages: 0, divorces: 0 };
   }
 
   function newStats() {
     return {
       turns: 0, donated: 0, deals: 0, good: 0, bad: 0, timesDownsized: 0, promotions: 0, raises: 0, interestPaid: 0,
-      passiveEarned: 0, realizedGains: 0, luxurySpent: 0, weddingSpent: 0, datingSpent: 0, networkingSpent: 0, optionTrades: 0
+      passiveEarned: 0, realizedGains: 0, luxurySpent: 0, weddingSpent: 0, datingSpent: 0, networkingSpent: 0, optionTrades: 0, trades: 0
     };
   }
 
   /** Fill in fields added after a save was made, so older save files keep working. */
   function migratePlayer(p) {
     if (!p.relationship) p.relationship = newRelationship();
+    if (p.relationship.nextBabyAsk == null) p.relationship.nextBabyAsk = (p.relationship.lastBabyAsk || 0) + 4;
     if (!p.network) p.network = { club: null, conferenceTurns: 0, conferences: 0 };
     if (!Array.isArray(p.options)) p.options = [];
     if (!p.shorts) p.shorts = {};
@@ -330,6 +331,23 @@
       if (!p.home.name) p.home.name = 'Your home';
     }
     for (const pr of p.properties) if (pr.localMult == null) pr.localMult = 1;
+  }
+
+  /**
+   * Student loans. Jobs that need a degree always come with them: about $22k–$38k for a bachelor's,
+   * multiplied for graduate school (a doctor's ~6 extra years of school ≈ 5×). Professional-school
+   * loans are repaid over a longer term. Other jobs sometimes carry a smaller loan from some college.
+   */
+  function addStudentLoans(state, p, rng, job) {
+    const Dt = D();
+    const degree = job.degree ? Dt.DEGREES[job.degree] : null;
+    if (!degree && !rng.chance(job.student || 0)) return null;
+    const base = rng.range(Dt.UNDERGRAD_LOAN);
+    const balance = roundTo(base * (degree ? degree.loanMult : rng.range(Dt.SOME_COLLEGE_LOAN)), 100);
+    const apr = cents(degree && degree.extraYears ? rng.float(5.5, 7.5) : rng.float(4.0, 6.5));
+    const term = degree && degree.extraYears ? rng.int(144, 240) : rng.int(96, 144);
+    const name = degree ? `Student loans (${degree.label})` : 'Student loans (some college)';
+    return addDebt(state, p, { type: 'student', name, balance, apr, termMonths: term });
   }
 
   function createPlayer(state, rng, cfg, job) {
@@ -378,32 +396,19 @@
       p.expenses[cat.id] = roundTo(livingTotal * cat.share * rng.float(0.85, 1.15), 5);
     }
 
-    // Home: renters pay rent in "housing"; owners pay a mortgage plus taxes & upkeep.
-    p.ownsHome = rng.chance(Math.min(0.75, 0.2 + Math.max(0, (salary - 2500) / 14000)));
-    if (p.ownsHome) {
-      const rentEquivalent = p.expenses.housing;
-      p.expenses.housing = roundTo(rentEquivalent * rng.float(0.25, 0.35), 5);
-      const apr = cents(rng.float(3.0, 7.0));
-      const term = rng.int(180, 340);
-      const pay = rentEquivalent * rng.float(0.8, 1.1);
-      const loan = addDebt(state, p, { type: 'mortgage', name: 'Home mortgage', balance: principalFromPayment(pay, apr, term), apr, termMonths: term });
-      // The home itself is worth more than the mortgage (some equity) and tracks the housing market.
-      const value = roundTo(loan.balance * rng.float(1.15, 1.6), 1000);
-      p.home = { name: 'Your home', value, reIndex: state.market.reIndex, localMult: 1, boughtRound: 0, purchasePrice: value };
-    }
+    // Everyone starts out renting: "housing" is their rent. Homes for sale are listed every turn
+    // in the Portfolio tab, so players can buy one later.
 
-    // Starting debts of various kinds.
+    // Student loans come first: anyone whose job needs a degree always has them, sized to the schooling.
+    addStudentLoans(state, p, rng, job);
+
+    // Other starting debts of various kinds.
     if (rng.chance(0.85)) {
       addDebt(state, p, { type: 'credit', name: rng.pick(Dt.CARD_NAMES), balance: roundTo(salary * rng.float(0.2, 2.5), 50), apr: cents(rng.float(19.99, 27.99)), revolving: true });
     }
     if (rng.chance(0.7)) {
       const apr = cents(rng.float(4.5, 9.5)), term = rng.int(18, 60);
       addDebt(state, p, { type: 'auto', name: `Auto loan (${rng.pick(Dt.CAR_TYPES)})`, balance: principalFromPayment(salary * rng.float(0.05, 0.11), apr, term), apr, termMonths: term });
-    }
-    if (rng.chance(job.student)) {
-      const apr = cents(rng.float(4.0, 7.5)), term = rng.int(60, 150);
-      const share = salary > 9000 ? rng.float(0.05, 0.12) : rng.float(0.03, 0.09);
-      addDebt(state, p, { type: 'student', name: 'Student loans', balance: principalFromPayment(salary * share, apr, term), apr, termMonths: term });
     }
     if (rng.chance(0.2)) {
       const apr = cents(rng.float(9, 17)), term = rng.int(12, 48);
@@ -431,8 +436,9 @@
       const living = livingExpenses(p);
       const factor = Math.max(0.7, (living - (minCf - cf())) / living);
       for (const k in p.expenses) p.expenses[k] = roundTo(p.expenses[k] * factor, 5);
+      // Trim optional starting debts, never the student loans a degree job requires.
       while (cf() < minCf) {
-        const removable = p.debts.filter((d) => d.type !== 'mortgage').sort((a, b) => b.payment - a.payment);
+        const removable = p.debts.filter((d) => d.type !== 'mortgage' && !(d.type === 'student' && job.degree)).sort((a, b) => b.payment - a.payment);
         if (!removable.length) break;
         p.debts = p.debts.filter((d) => d !== removable[0]);
       }
@@ -695,7 +701,7 @@
     propertyValue, propertyCashflow, propertySale, businessProfit, businessCashflow, businessValue, businessSale, noteIncome, homeValue,
     homeMortgage, homeSale, relStatus, isMarried, networkLevel,
     salaryIncome, gigIncome, dividendIncome, livingExpenses, partnerShare, childExpenses, datingCost, clubDues, debtPayments, stocksValue, summarize,
-    bankRate, loanLimit, createPlayer, migratePlayer, newRelationship, payday, snapshot, revealBusiness
+    bankRate, loanLimit, addStudentLoans, createPlayer, migratePlayer, newRelationship, payday, snapshot, revealBusiness
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.Core;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -428,3 +428,19 @@ h4 { margin: 16px 0 6px; }
 .recap li.tone-good::marker { color: var(--good-text); }
 .recap li.tone-bad::marker { color: var(--bad-text); }
 @media (max-width: 560px) { .prow { flex-wrap: wrap; } .prow .ptype { min-width: 0; flex: 1; } }
+
+/* Trading between players */
+.trade-group { margin-bottom: 10px; }
+.trade-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--raised); margin-bottom: 6px; }
+label.trade-item { cursor: pointer; }
+label.trade-item:hover { background: var(--raised-2); }
+.trade-item input[type="checkbox"] { flex: none; }
+.trade-item .ti-name { flex: 1; min-width: 0; }
+.trade-item .ti-qty { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.trade-cash { margin-top: 12px; }
+.trade-cash .qty.wide { width: 140px; }
+.trade-list { margin: 0; padding-left: 1.1em; }
+.trade-list li { margin-bottom: 6px; }
+.trade-sides { margin-bottom: 8px; }
+.trade-sides h4 { margin-top: 0; }
+.handoff-note { border-left: 3px solid var(--pc); background: var(--raised); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }

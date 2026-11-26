@@ -7,7 +7,7 @@
   'use strict';
   if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
     require('./rng.js'); require('./data.js'); require('./core.js');
-    require('./market.js'); require('./options.js'); require('./deals.js'); require('./events.js'); require('./ai.js');
+    require('./market.js'); require('./options.js'); require('./deals.js'); require('./trade.js'); require('./events.js'); require('./ai.js');
   }
   const MMS = global.MMS || (global.MMS = {});
   const C = MMS.Core, D = MMS.Data, RNG = MMS.RNG;
@@ -133,6 +133,7 @@
 
   function canEndTurn(state) {
     if (state.phase !== 'turn') return fail('No turn in progress.');
+    if (state.turn.pendingTrade) return fail('A trade offer is still waiting for an answer.');
     const open = state.turn.cards.find((c) => c.required && !c.resolved);
     if (open) return fail(open.type === 'expense' ? `First decide how to pay for "${open.title}".` : `First make a decision on "${open.title}".`);
     return { ok: true };
@@ -165,6 +166,7 @@
   function endTurn(state, opts) {
     opts = opts || {};
     if (state.phase !== 'turn') return fail('No turn in progress.');
+    if (state.turn.pendingTrade && !opts.force) return canEndTurn(state);
     const p = current(state);
     for (const c of state.turn.cards) {
       if (c.resolved) continue;
@@ -481,6 +483,54 @@
     return done(state, r);
   }
 
+  // ------------------------------------------------------------------ trading between players
+  /** A computer opponent hears at most this many offers from the same player in one turn. */
+  const MAX_BOT_OFFERS = 3;
+
+  /**
+   * Offer a trade to another player: { to, give: { cash, items }, get: { cash, items } }.
+   * A computer opponent answers right away. A person has to accept on the shared device:
+   * the offer waits in state.turn.pendingTrade until answerTrade() is called.
+   */
+  function proposeTrade(state, offer) {
+    const bad = requireTurn(state); if (bad) return bad;
+    if (state.turn.pendingTrade) return fail('Wait for an answer to your last offer first.');
+    const p = current(state);
+    const t = { from: p.id, to: offer && offer.to, give: (offer && offer.give) || {}, get: (offer && offer.get) || {} };
+    const d = MMS.Trade.describe(state, t);
+    if (!d.ok) return fail(d.reason);
+    const other = d.to;
+    if (isBot(other)) {
+      const asks = state.turn.tradeAsks || (state.turn.tradeAsks = {});
+      if ((asks[other.id] || 0) >= MAX_BOT_OFFERS) return fail(`${other.name} has turned down ${MAX_BOT_OFFERS} offers this month and won't hear more until next turn.`);
+      const v = MMS.AI.considerTrade(state, other, MMS.Trade.perspective(d, other.id));
+      if (!v.accept) {
+        asks[other.id] = (asks[other.id] || 0) + 1;
+        C.log(state, `${other.name} turned down a trade offer from ${p.name}.`, 'neutral', p.id);
+        return { ok: true, accepted: false, msg: `${other.name} 🤖 said no: “${v.reason}”` };
+      }
+      return done(state, Object.assign(MMS.Trade.execute(state, t), { accepted: true }));
+    }
+    state.turn.pendingTrade = { id: C.nextId(state, 't'), from: t.from, to: t.to, give: t.give, get: t.get };
+    return { ok: true, pending: true };
+  }
+
+  /** The other person accepts (true) or declines (false) the waiting trade offer. */
+  function answerTrade(state, accept) {
+    const bad = requireTurn(state); if (bad) return bad;
+    const t = state.turn.pendingTrade;
+    if (!t) return fail('No trade offer is waiting.');
+    state.turn.pendingTrade = null;
+    const other = C.getPlayer(state, t.to);
+    if (!accept) {
+      C.log(state, `${other.name} turned down a trade offer from ${current(state).name}.`, 'neutral', t.from);
+      return { ok: true, accepted: false, msg: `${other.name} declined the trade.` };
+    }
+    const r = MMS.Trade.execute(state, t);
+    if (!r.ok) return r;
+    return done(state, { ok: true, accepted: true, msg: `${other.name} accepted! ${r.msg}` });
+  }
+
   // ------------------------------------------------------------------ networking
   function cancelClub(state) {
     const bad = requireTurn(state); if (bad) return bad;
@@ -605,7 +655,7 @@
     createGame, beginTurn, resolveCard, markSeen, canEndTurn, endTurn, claimFreedom, continueGame,
     isBot, humans, activeHumans, playBotTurn, runBots, finishGame,
     buyStock, sellStock, payDebt, payAssetLoan, borrow, sellAsset, downshift, downshiftInfo,
-    buyOption, sellOption, shortSell, coverShort, sellHome, buyHome, cancelClub,
+    buyOption, sellOption, shortSell, coverShort, sellHome, buyHome, cancelClub, proposeTrade, answerTrade, MAX_BOT_OFFERS,
     coachTips, standings, activePlayers, checkFreedom, serialize, deserialize, interestLeft
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS;

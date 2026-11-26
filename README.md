@@ -17,7 +17,7 @@ No install, no build step, no dependencies.
 |---|---|
 | **Just open it** | Double-click `index.html` (or drag it into any modern browser). |
 | **Node.js** (18+) | From the repo root: `npm start`, then open <http://localhost:8080> (`PORT=3000 npm start` for another port). |
-| **Python 3** | From the repo root: `python3 -m http.server 8080`, then open <http://localhost:8080>. |
+| **Python 3** | From the repo root: `python3 wsgi.py` (or `python3 -m http.server 8080`), then open <http://localhost:8080>. |
 
 The game autosaves in your browser after every action. Use **☰ Menu → Download save file** to move a game
 to another computer and **Load a save file** to continue it there.
@@ -26,6 +26,7 @@ Other commands:
 
 ```bash
 npm test           # engine + market tests (Node's built-in test runner)
+npm run test:wsgi  # tests for the WSGI deployment entry point (Python 3)
 npm run simulate   # play 200 bot games and report how long freedom takes
                    # npm run simulate -- [games] [players] [easy|normal|hard|mix], e.g. npm run simulate -- 300 3 mix
 ```
@@ -38,15 +39,20 @@ Each turn:
    If you can't cover the bills, the shortfall goes on a credit card.
 2. **Pop-ups** — random events appear, but not every turn:
    - **Deals** (about half of turns): real estate, businesses, startups, side projects, lending notes, collectibles and stock tips.
-   - **Luxury temptations** and **emergencies** — pay cash or put them on a credit card.
+   - **Luxury temptations** (about one turn in four) — vacations, gadgets, shopping sprees, and a new car once
+     yours is paid off (a down payment plus a 5-year loan). The more lavish your lifestyle, the more often temptation knocks.
+   - **Surprise bills** (about one turn in four) — car repairs, medical bills and more. Owning a home, a boat or having
+     kids brings its own kinds of bills. Pay cash or put them on a credit card.
    - **Downsizing** — no paycheck for 1–6 turns (networking shortens it). **Promotions**, smaller permanent **raises**, bonuses, side gigs, lifestyle creep and more.
    - **Networking** — a one-time conference fee or a monthly club subscription makes raises, promotions and side gigs more likely and shortens job searches.
-   - **Relationships** — meet someone and date, get married (pay cash for the wedding, finance it, or keep it simple), have children, break up or divorce.
+   - **Relationships** — meet someone and date (about 5% of dating months end in a breakup, more if you keep putting off marriage),
+     get married (pay cash for the wedding, finance it, or keep it simple), have children (married couples are asked often), or divorce.
    - **Startup results** — a pop-up tells you when a startup you backed succeeds or fails.
    - **Charity** — donate 10% of your monthly income for 3 turns of good karma (better deals, more good luck, fewer layoffs).
+     If you've been laid off, it's still 10% of your usual salary.
    - **Buyer offers** for your properties and businesses, repairs, vacancies and expansion opportunities.
 3. **Act** — buy deals, trade stocks, options and short positions, pay down debt, borrow from the bank, sell assets,
-   buy or sell the home you live in, or downshift your lifestyle.
+   trade assets with other players, buy or sell the home you live in, or downshift your lifestyle.
 4. **End your turn** and pass the device. When everyone has played, the month ends and the market moves.
 
 **Computer opponents:** on the setup screen, switch any seat from *Person* to a bot, or press
@@ -78,13 +84,21 @@ players by progress, and the freedom goal can be set to 1.5× or 3× for shorter
   partnerships, laundromats, car washes, franchises and daycares — some take a few turns to launch before their
   real profit is revealed. Plus startup investments, side projects, lending notes and collectibles.
 - **26 jobs** (barista to doctor), 4 lifestyles, and starting debts across credit cards, auto, student,
-  mortgage, personal, medical, buy-now-pay-later and boat loans.
+  personal, medical, buy-now-pay-later and boat loans. Everyone starts out renting.
+- **Student loans by degree**: every job that needs a college degree (teacher, nurse, accountant, engineer,
+  software engineer, data scientist…) starts with about $22k–$38k of student loans. Graduate school multiplies it —
+  lawyers 3×, pharmacists 3.5×, dentists 4×, and doctors (about 6 more years of school and training) 5×. Other jobs
+  sometimes carry a smaller loan from some college.
+- **Trading between players** (2+ players): in the Trade tab, offer any mix of rentals, land, businesses, startup
+  stakes, lending notes, collectibles, shares and cash for any of another player's, at whatever price you agree on.
+  Loans on an asset go with it. People accept or decline on the shared device; bots answer instantly and only accept
+  trades that leave them better off (3 offers per bot per turn).
 - **A bank** that lends as long as the payment fits your cashflow.
 - **Options & short selling**: calls, puts and straddles (1-, 3- and 6-month expiries, 100 shares per contract) priced with
   Black–Scholes from each stock's live volatility, with a bid/ask spread and a payoff chart; short sales with a 50% margin deposit,
   monthly borrow fees and dividends owed, and automatic margin calls.
 - **Your home**: every home and rental has its own neighborhood value on top of the regional housing market, plus local news
-  that moves it. Sell your home and rent, or buy from three listings each turn (5–20% down, 3% closing costs, 43% debt-to-income limit).
+  that moves it. Everyone starts as a renter and can buy from three listings each turn (5–20% down, 3% closing costs, 43% debt-to-income limit).
 - **Relationships**: everyone starts single. Dating costs money each month; a spouse splits household bills (a couple's household
   costs about 1.5× a single person's), children's costs are shared, and divorce costs legal fees plus half your cash and stocks.
 - **Networking**: conferences (one-time, ~12 months of benefit) and clubs (joining fee + monthly dues, cancel any time).
@@ -121,6 +135,27 @@ a market "fear gauge" that spikes in crashes and recessions, rare fat-tailed jum
 between boom, stable and recession, interest-rate moves, quarterly earnings seasons, dividend growth,
 stock splits, and calibration so news, earnings and jumps add up to each asset's target volatility.
 
+## Deploying it
+
+The game runs entirely in the browser; a server only has to hand out `index.html`, `css/` and `js/`.
+`wsgi.py` is a standard [WSGI](https://peps.python.org/pep-3333/) app for doing that from any Python host.
+It uses only the Python standard library, and it serves nothing else (not the server code, tests, or `.git`).
+Each player's saved game stays in their own browser, so the server keeps no data and needs no database.
+
+| Host | How |
+|---|---|
+| **gunicorn** (Linux/macOS) | `pip install gunicorn`, then `gunicorn -b 0.0.0.0:8080 wsgi:application` |
+| **waitress** (Windows or anywhere) | `pip install waitress`, then `waitress-serve --port=8080 wsgi:application` |
+| **Render / Heroku / Railway** | Put `gunicorn` in a `requirements.txt` and use the start command (or `Procfile` line) `web: gunicorn -b 0.0.0.0:$PORT wsgi:application` |
+| **PythonAnywhere** | In the Web tab's WSGI file: `import sys; sys.path.insert(0, '/home/<you>/money-making-simulator'); from wsgi import application` |
+| **Apache mod_wsgi** | `WSGIScriptAlias /game /path/to/money-making-simulator/wsgi.py` |
+
+- **Health check:** `GET /healthz` answers `200 ok`, for load balancers and uptime monitors.
+- **Under a path:** it works mounted under a prefix like `/game`, which redirects to `/game/`.
+- **Caching:** files are sent with `Cache-Control: no-cache` plus an `ETag`. Browsers check back cheaply (a `304`) on each load,
+  so players get the new version right after a deploy.
+- **HTTPS:** let the host or a reverse proxy (nginx, Caddy, the platform's load balancer) handle it.
+
 ## Project layout
 
 ```
@@ -132,12 +167,14 @@ js/core.js          finance math, player generation, income/expenses, payday
 js/market.js        stock market, economy cycle, interest rates, statistics
 js/options.js       options pricing (Black–Scholes), option & short positions, settlement, margin calls
 js/deals.js         deal generation, buying/selling, deal analysis, buying/selling your own home
+js/trade.js         trades between players: valuing, checking and carrying out offers
 js/events.js        random events, raises, networking, relationships, charity, offers, lessons
 js/ai.js            computer opponents (easy / normal / hard)
 js/engine.js        game setup, turn flow, bot turns, player actions, money coach, save/load
 js/ui.js            rendering and input
 server.js           optional zero-dependency local web server
-tests/              node --test suite
+wsgi.py             WSGI entry point for deploying on a Python host (standard library only)
+tests/              node --test suite, plus tests/test_wsgi.py (python3 -m unittest)
 scripts/simulate.js balance simulator
 ```
 

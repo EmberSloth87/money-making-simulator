@@ -198,21 +198,54 @@
   ];
 
   // ------------------------------------------------------------------ bad life events
+  /** Surprise bills you can't avoid. Owning a home, a boat or having kids adds their own kinds of bills. */
+  function emergencyPool(p) {
+    const boat = p.debts.some((d) => d.type === 'boat');
+    return D().EMERGENCIES.filter((e) => (!e.homeowner || p.ownsHome) && (!e.kids || p.children > 0) && (!e.boat || boat));
+  }
+
+  function emergency(state, p, rng) {
+    const e = rng.pick(emergencyPool(p));
+    const cost = C().roundTo(rng.range(e.cost) * C().clamp(p.job.startSalary / 5000, 0.7, 1.6), 10);
+    return { expense: cost, icon: e.icon, title: e.title, text: `${e.text} Cost: ${C().money(cost)}.`, lesson: LESSONS.emergencyFund };
+  }
+
+  /** An extra surprise bill on top of the usual life events (about one turn in eight; less with good karma). */
+  function surpriseBill(state, p, rng) {
+    const r = emergency(state, p, rng);
+    return expenseCard(state, p, { icon: r.icon, title: r.title, text: r.text, tone: 'bad', lesson: r.lesson, data: { cost: r.expense } }, r.expense);
+  }
+
+  /** Luxuries this player could be tempted by. A new-car splurge only comes up once the current car is paid off. */
+  function luxuryPool(p) {
+    const carLoan = p.debts.some((d) => d.type === 'auto');
+    return D().LUXURIES.filter((l) => (!l.minLifestyle || p.lifestyle >= l.minLifestyle) && (!l.homeowner || p.ownsHome) && (!l.carLoan || !carLoan));
+  }
+
+  /** A luxury temptation, scaled to lifestyle and income. `skip` lists titles already shown this turn. */
+  function luxury(state, p, rng, skip) {
+    const life = C().lifestyleOf(p);
+    const all = luxuryPool(p);
+    const pool = skip ? all.filter((l) => !skip.includes(l.title)) : all;
+    const l = rng.pick(pool.length ? pool : all);
+    const scale = life.luxury * C().clamp(p.job.startSalary / 5000, 0.6, 2.2);
+    const cost = C().roundTo(rng.range(l.cost) * scale, 10);
+    if (!l.carLoan) return { expense: cost, icon: l.icon, title: l.title, text: `${l.text} Cost: ${C().money(cost)}.`, lesson: LESSONS.luxury, flavor: 'luxury' };
+    // The car comes with a 5-year loan, which raises monthly expenses (and the freedom target) for years.
+    const apr = C().cents(rng.float(6, 9.5)), term = 60;
+    const kind = rng.pick(D().CAR_TYPES);
+    const balance = C().roundTo(C().principalFromPayment(p.job.startSalary * rng.float(0.05, 0.08) * C().clamp(life.luxury, 0.8, 1.3), apr, term), 100);
+    const d = C().addDebt(state, p, { type: 'auto', name: `Auto loan (new ${kind})`, balance, apr, termMonths: term });
+    return {
+      expense: cost, icon: l.icon, title: l.title, flavor: 'luxury',
+      text: `${l.text} Your new ${kind} needs ${C().money(cost)} down, and you financed ${C().money(balance)} at ${apr.toFixed(2)}% for 5 years: ${C().money(d.payment)}/mo.`,
+      lesson: `A new car loses about 20% of its value in the first year, and its ${C().money(d.payment)}/mo payment raises your freedom target by ${C().money(d.payment * state.settings.freedomMultiple)}/mo. Driving a paid-off car longer is one of the easiest ways to keep money for investing.`
+    };
+  }
+
   const BAD = [
-    { id: 'luxury', w: 10, make(state, p, rng) {
-      const life = C().lifestyleOf(p);
-      const pool = D().LUXURIES.filter((l) => (!l.minLifestyle || p.lifestyle >= l.minLifestyle) && (!l.homeowner || p.ownsHome));
-      const l = rng.pick(pool);
-      const scale = life.luxury * C().clamp(p.job.startSalary / 5000, 0.6, 2.2);
-      const cost = C().roundTo(rng.range(l.cost) * scale, 10);
-      return { expense: cost, icon: l.icon, title: l.title, text: `${l.text} Cost: ${C().money(cost)}.`, lesson: LESSONS.luxury, flavor: 'luxury' };
-    } },
-    { id: 'emergency', w: 10, make(state, p, rng) {
-      const pool = D().EMERGENCIES.filter((e) => !e.homeowner || p.ownsHome);
-      const e = rng.pick(pool);
-      const cost = C().roundTo(rng.range(e.cost) * C().clamp(p.job.startSalary / 5000, 0.7, 1.6), 10);
-      return { expense: cost, icon: e.icon, title: e.title, text: `${e.text} Cost: ${C().money(cost)}.`, lesson: LESSONS.emergencyFund };
-    } },
+    { id: 'luxury', w: 12, make: (state, p, rng) => luxury(state, p, rng) },
+    { id: 'emergency', w: 14, make: emergency },
     { id: 'creep', w: 3, make(state, p, rng) {
       const options = [
         ['transport', 'Your car insurance premium jumped after a fender-bender.'],
@@ -501,6 +534,7 @@
     const { money } = C();
     const r = p.relationship;
     r.lastBabyAsk = state.round;
+    r.nextBabyAsk = state.round + BABY_AFTER_NO;
     const half = Math.round(p.childCost * 0.5);
     return card(state, {
       type: 'baby', icon: '👶', tone: 'neutral', title: `${r.partner.name} asks about having a baby`,
@@ -532,18 +566,27 @@
     return s.cashflow < 0 || (!C().isEmployed(p) && !p.retired) || !!(cc && cc.balance > p.job.startSalary * 1.5);
   }
 
+  // Relationship odds per turn.
+  const BREAKUP_BASE = 0.05;        // ~5%/month while dating
+  const BREAKUP_PER_DECLINE = 0.04; // each declined proposal (up to 3) adds 4 points
+  const BABY_CHANCE = 0.15;         // once married, the baby question comes up often
+  const BABY_AFTER_WEDDING = 2;     // months after the wedding before it can first come up
+  const BABY_AFTER_NO = 4;          // months to wait after saying "not right now"
+  const BABY_AFTER_BIRTH = 9;       // months after a baby before the next one can come up
+
   function relationshipEvent(state, p, rng) {
     const r = p.relationship;
     if (!r) return null;
     if (r.status === 'single') return rng.chance(0.045) ? meetSomeone(state, p, rng) : null;
     if (r.status === 'dating') {
-      if (rng.chance(0.022 + (r.declined ? 0.03 : 0))) return breakup(state, p, rng);
+      // Most dating relationships don't last; saying "not ready yet" to marriage strains them further.
+      if (rng.chance(BREAKUP_BASE + BREAKUP_PER_DECLINE * Math.min(3, r.declined || 0))) return breakup(state, p, rng);
       if (state.round - r.since >= 4 && rng.chance(0.09)) return proposal(state, p, rng);
       return null;
     }
     if (r.status === 'married') {
       if (rng.chance(0.0035 * (moneyStress(state, p) ? 2.5 : 1))) return marriageTrouble(state, p, rng);
-      if (p.children < 4 && state.round - r.lastBabyAsk >= 6 && rng.chance(0.06)) return babyOffer(state, p);
+      if (p.children < 4 && state.round >= (r.nextBabyAsk || 0) && rng.chance(BABY_CHANCE)) return babyOffer(state, p);
     }
     return null;
   }
@@ -588,15 +631,25 @@
   }
 
   // ------------------------------------------------------------------ charity
-  function charity(state, p, rng) {
-    const { roundTo, money, summarize } = C();
+  /**
+   * 10% of monthly income. A player between jobs is asked for 10% of the salary they'd normally earn,
+   * so a layoff isn't a cheap moment to buy good karma.
+   */
+  function charityAmount(state, p) {
+    const { roundTo, summarize } = C();
     const s = summarize(state, p);
-    const income = s.salary + s.gigs + Math.max(0, s.passive);
-    const amt = Math.max(50, roundTo(income * 0.1, 5));
+    const salary = p.retired ? 0 : p.job.salary;
+    return Math.max(50, roundTo((salary + s.gigs + Math.max(0, s.passive)) * 0.1, 5));
+  }
+
+  function charity(state, p, rng) {
+    const { money, isEmployed } = C();
+    const amt = charityAmount(state, p);
+    const between = !isEmployed(p);
     const cause = rng.pick(['the local food bank', 'a children\'s hospital', 'the animal shelter', 'disaster relief', 'a literacy nonprofit', 'clean-water wells abroad', 'a youth sports league']);
     return card(state, {
       type: 'charity', icon: '💝', tone: 'neutral', title: 'Charity drive',
-      text: `A friend is raising money for ${cause}. Donate 10% of your monthly income (${money(amt)}) and good things may come your way: for your next 3 turns, good events and great deals become more likely and bad luck less likely.`,
+      text: `A friend is raising money for ${cause}. Donate 10% of your monthly income (${money(amt)}${between ? `, based on your usual ${money(p.job.salary)} salary even though you're between jobs` : ''}) and good things may come your way: for your next 3 turns, good events and great deals become more likely and bad luck less likely.`,
       data: { amount: amt, cause },
       choices: [{ id: 'donate', label: `Donate ${money(amt)}`, style: 'primary' }, { id: 'decline', label: 'Not this time' }],
       lesson: 'Many people give a set share of their income to causes they care about. In this game, generosity also earns you good karma.'
@@ -645,6 +698,19 @@
   }
 
   // ------------------------------------------------------------------ turn generation
+  const SURPRISE_BILL_CHANCE = 0.12;
+  /** Temptation knocks more often the more lavish your lifestyle (frugal ~9% of turns, lavish ~23%), and less while you're out of work. */
+  const TEMPTATION_CHANCE = 0.15;
+  function temptationChance(p) {
+    return TEMPTATION_CHANCE * C().lifestyleOf(p).luxury * (C().isEmployed(p) || p.retired ? 1 : 0.5);
+  }
+
+  function temptation(state, p, rng) {
+    const shown = state.turn.cards.map((c) => c.title);
+    const r = luxury(state, p, rng, shown);
+    return expenseCard(state, p, { icon: r.icon, title: r.title, text: r.text, tone: 'bad', lesson: r.lesson, data: { cost: r.expense, flavor: r.flavor } }, r.expense);
+  }
+
   /** Generate this turn's cards for player p. Deals are random — not every turn has one. */
   function generate(state, p, rng) {
     const cards = state.turn.cards;
@@ -662,6 +728,9 @@
     }
 
     if (rng.chance(0.5)) cards.push(lifeEvent(state, p, rng, rng.chance(karma ? 0.72 : 0.45)));
+    if (rng.chance(karma ? SURPRISE_BILL_CHANCE / 2 : SURPRISE_BILL_CHANCE)) cards.push(surpriseBill(state, p, rng));
+    // Temptation is human nature, not bad luck, so good karma doesn't keep it away.
+    if (rng.chance(temptationChance(p))) cards.push(temptation(state, p, rng));
 
     // Your network sends extra side-gig offers your way.
     if (net && !p.retired && p.sideGigs.length < 2 && rng.chance(0.035 * net) && !cards.some((c) => c.type === 'sidegig')) {
@@ -844,7 +913,7 @@
         }
         const before = C().livingExpenses(p);
         scaleHousehold(p, HOUSEHOLD_SCALE);
-        Object.assign(r, { status: 'married', datingCost: 0, declined: 0, since: state.round, lastBabyAsk: state.round });
+        Object.assign(r, { status: 'married', datingCost: 0, declined: 0, since: state.round, lastBabyAsk: state.round, nextBabyAsk: state.round + BABY_AFTER_WEDDING });
         r.marriages++;
         p.childShare = 0.5;
         c.outcome = `💒 Married ${r.partner.name}! ${how}. Your household now spends ${money(C().livingExpenses(p))}/mo instead of ${money(before)}, and ${r.partner.name} pays half — your share is ${money(C().livingExpenses(p) - C().partnerShare(p))}/mo.`;
@@ -855,6 +924,7 @@
         if (choice !== 'yes') { c.outcome = 'Not right now'; return { ok: true }; }
         if (p.relationship.status !== 'married') { c.outcome = 'That relationship has ended'; return { ok: true }; }
         p.children++;
+        p.relationship.nextBabyAsk = state.round + BABY_AFTER_BIRTH;
         c.outcome = `👶 Welcome to the family! Your half of the costs: +${money(c.data.half)}/mo`;
         log(state, `${p.name} and ${p.relationship.partner.name} had a baby!`, 'good', p.id);
         return { ok: true };
@@ -899,6 +969,6 @@
     return 'decline';
   }
 
-  MMS.Events = { generate, resolve, defaultChoice, popup, maxJobSearch, LESSONS };
+  MMS.Events = { generate, resolve, defaultChoice, popup, maxJobSearch, charityAmount, emergencyPool, luxuryPool, temptation, temptationChance, LESSONS, BREAKUP_BASE, BABY_CHANCE, SURPRISE_BILL_CHANCE, TEMPTATION_CHANCE };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.Events;
 })(typeof window !== 'undefined' ? window : globalThis);

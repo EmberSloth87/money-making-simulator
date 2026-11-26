@@ -32,7 +32,7 @@ test('creates games for 1 to 8 players with random jobs, expenses and debts', ()
   // Across many games, players start with several kinds of debt.
   const kinds = new Set();
   for (let g = 0; g < 40; g++) for (const p of newGame(4, { seed: `debts-${g}` }).players) p.debts.forEach((d) => kinds.add(d.type));
-  for (const k of ['credit', 'auto', 'student', 'mortgage']) assert.ok(kinds.has(k), `some player starts with ${k} debt`);
+  for (const k of ['credit', 'auto', 'student']) assert.ok(kinds.has(k), `some player starts with ${k} debt`);
 });
 
 test('the same seed produces the same game', () => {

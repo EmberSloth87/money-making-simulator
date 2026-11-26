@@ -243,6 +243,45 @@
     if (spent) act({ ok: true }, `Invested ${C().money(spent)} in dividend stocks`, 'good');
   }
 
-  MMS.AI = { LEVELS, LEVEL_IDS, BOT_NAMES, isBot, makeBot, playTurn };
+  // ------------------------------------------------------------------ trade offers from other players
+  /** Extra value a bot wants to come out ahead by before it agrees to a trade. */
+  const TRADE_EDGE = { easy: -0.05, normal: 0.05, hard: 0.1 };
+
+  /**
+   * What an asset is worth to this bot: its equity (value minus any loan that comes with it).
+   * Every bot marks down an asset that loses money by a year of its losses. The investor also
+   * values steady passive income at no less than three years of it — that income is how it wins.
+   */
+  function tradeWorth(it, L) {
+    let w = it.equity;
+    if (it.cashflow < 0) w += it.cashflow * 12;
+    else if (L === LEVELS.hard) w = Math.max(w, it.cashflow * 36);
+    return w;
+  }
+
+  /**
+   * Decide on a trade another player offered. `v` is the trade from this bot's side:
+   * { gives, gets } as built by MMS.Trade.perspective. Returns { accept, reason }.
+   */
+  function considerTrade(state, p, v) {
+    const L = level(p);
+    const rng = MMS.RNG.makeRng(p.bot);
+    const worth = (side) => side.cash + side.items.reduce((t, it) => t + tradeWorth(it, L), 0);
+    const give = worth(v.gives), get = worth(v.gets);
+    const cashAfter = p.cash - v.gives.cash + v.gets.cash;
+    const reserve = Math.max(1000, C().summarize(state, p).expenses * L.reserveMonths);
+    if (v.gives.cash > 0 && cashAfter < reserve) return { accept: false, reason: 'I can\'t spare that much cash right now.' };
+    const cfAfter = C().summarize(state, p).cashflow + v.gets.cashflow - v.gives.cashflow;
+    if (cfAfter < 0 && L !== LEVELS.easy) return { accept: false, reason: 'That would leave me losing money every month.' };
+    const edge = TRADE_EDGE[p.bot.level] != null ? TRADE_EDGE[p.bot.level] : TRADE_EDGE.normal;
+    const need = give * (1 + edge) + (give > 0 && L !== LEVELS.easy ? 250 : 0);
+    if (get >= need) return { accept: true, reason: 'Deal!' };
+    // The spender sometimes takes a slightly bad deal anyway.
+    if (L === LEVELS.easy && get >= give * 0.85 && rng.chance(0.4)) return { accept: true, reason: 'Eh, why not!' };
+    const short = Math.max(0, need - get);
+    return { accept: false, reason: short < 2000 ? 'Close, but not quite worth it to me.' : 'That\'s not worth it to me.' };
+  }
+
+  MMS.AI = { LEVELS, LEVEL_IDS, BOT_NAMES, isBot, makeBot, playTurn, considerTrade, tradeWorth };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.AI;
 })(typeof window !== 'undefined' ? window : globalThis);
