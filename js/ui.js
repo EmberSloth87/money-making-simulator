@@ -4,7 +4,7 @@
  */
 (function () {
   'use strict';
-  const { Engine: E, Core: C, Data: D, Market: M, Deals } = window.MMS;
+  const { Engine: E, Core: C, Data: D, Market: M, Deals, Options: O, AI } = window.MMS;
   const SAVE_KEY = 'mms.save.v1';
   const SETUP_KEY = 'mms.setup.v1';
   const $app = document.getElementById('app');
@@ -23,6 +23,10 @@
     chartMetric: 'netWorth',
     logFilter: 'all',
     expand: {},
+    opt: { sec: 'idx', kind: 'call', strike: 2, months: 3, contracts: 1 },
+    botRecap: [],   // recent computer turns, each tagged with a sequence number
+    recapSeen: {},  // person id → last recap sequence they've seen
+    recapSeq: 0,
     setup: loadSetup()
   };
 
@@ -53,6 +57,8 @@
   const tip = (text) => `<span class="tip" tabindex="0" role="img" aria-label="${esc(text)}" data-tip="${esc(text)}">?</span>`;
   const mult = () => S.settings.freedomMultiple;
   const fmtMult = (x) => `${Number(x).toString()}×`;
+  const botLevel = (p) => (p && p.bot ? AI.LEVELS[p.bot.level] || AI.LEVELS.normal : null);
+  const botTag = (p) => (p && p.bot ? ` <span class="bot-tag" data-tip="${esc(`Computer opponent · ${botLevel(p).name}: ${botLevel(p).desc}`)}">🤖 ${esc(botLevel(p).label)}</span>` : '');
 
   // ================================================================ storage
   function save() {
@@ -299,7 +305,7 @@
   });
 
   // Allocation bar (100% stacked, fixed color per category).
-  const ALLOC_COLORS = { cash: D.COLORS[0], stocks: D.COLORS[1], realestate: D.COLORS[2], business: D.COLORS[3], notes: D.COLORS[4], collect: D.COLORS[5], home: D.COLORS[6] };
+  const ALLOC_COLORS = { cash: D.COLORS[0], stocks: D.COLORS[1], realestate: D.COLORS[2], business: D.COLORS[3], notes: D.COLORS[4], collect: D.COLORS[5], home: D.COLORS[6], options: D.COLORS[7] };
   function allocationBar(parts) {
     const total = parts.reduce((a, p) => a + Math.max(0, p.value), 0);
     if (total <= 0) return '';
@@ -312,12 +318,18 @@
   }
 
   // ================================================================ title / setup screen
+  const setupHumans = () => ui.setup.players.filter((pl) => !pl.bot).length;
   function playerRow(pl, i) {
-    return `<div class="prow">
+    const lastHuman = !pl.bot && setupHumans() <= 1;
+    const opt = (v, label) => `<option value="${v}" ${(pl.bot || '') === v ? 'selected' : ''}>${label}</option>`;
+    return `<div class="prow ${pl.bot ? 'is-bot' : ''}">
       <button class="avatar-btn" data-action="setup-emoji" data-i="${i}" style="--pc:${pl.color}" aria-label="Change avatar">${esc(pl.emoji)}</button>
       <input class="pname" data-i="${i}" value="${esc(pl.name)}" maxlength="24" aria-label="Player ${i + 1} name">
+      <select class="ptype" data-i="${i}" aria-label="Who controls ${esc(pl.name)}" ${lastHuman ? 'disabled data-tip="At least one person has to play"' : ''}>
+        ${opt('', '🧑 Person')}${AI.LEVEL_IDS.map((id) => opt(id, `🤖 Bot · ${AI.LEVELS[id].label}`)).join('')}
+      </select>
       <button class="swatch" data-action="setup-color" data-i="${i}" style="background:${pl.color}" aria-label="Change color" data-tip="Change color"></button>
-      ${ui.setup.players.length > 1 ? `<button class="btn icon" data-action="setup-remove" data-i="${i}" aria-label="Remove player">✕</button>` : ''}
+      ${ui.setup.players.length > 1 && !lastHuman ? `<button class="btn icon" data-action="setup-remove" data-i="${i}" aria-label="Remove player">✕</button>` : '<span class="icon-spacer"></span>'}
     </div>`;
   }
 
@@ -334,14 +346,15 @@
       </header>
       ${saved ? `<section class="card resume">
         <div><div class="eyebrow">Saved game</div>
-        <div class="resume-title">Month ${saved.round} · ${saved.players.map((p) => `${esc(p.emoji)} ${esc(p.name)}`).join(', ')}</div></div>
+        <div class="resume-title">Month ${saved.round} · ${saved.players.map((p) => `${esc(p.emoji)} ${esc(p.name)}${p.bot ? ' 🤖' : ''}`).join(', ')}</div></div>
         <div class="btn-row"><button class="btn primary" data-action="resume">▶ Continue</button><button class="btn ghost" data-action="discard-save">Discard</button></div>
       </section>` : ''}
       <section class="card setup">
         <h2>Who's playing?</h2>
-        <p class="muted">1 to 8 players. Multiplayer is pass-and-play: everyone shares this device and takes turns.</p>
+        <p class="muted">1 to 8 players. Play solo, against computer opponents, or pass-and-play with friends on this device.</p>
         <div class="prows">${st.players.map(playerRow).join('')}</div>
-        ${st.players.length < 8 ? '<button class="btn ghost" data-action="setup-add">＋ Add player</button>' : ''}
+        ${st.players.length < 8 ? '<div class="btn-row"><button class="btn ghost" data-action="setup-add">＋ Add a person</button><button class="btn ghost" data-action="setup-add-bot">＋ Add a computer opponent 🤖</button></div>' : ''}
+        ${st.players.some((pl) => pl.bot) ? `<ul class="bot-levels muted small">${AI.LEVEL_IDS.map((id) => `<li><b>🤖 ${AI.LEVELS[id].label} — ${AI.LEVELS[id].name}:</b> ${esc(AI.LEVELS[id].desc)}</li>`).join('')}</ul>` : ''}
         <h3>Options</h3>
         <div class="opts">
           <label class="opt"><span>Game length</span>
@@ -387,8 +400,15 @@
     return { icon: '😱', label: 'Panicked' };
   }
 
+  /** Whose board to show: the current player during a turn, otherwise the last person who played. */
+  function viewPlayer() {
+    const cur = C.currentPlayer(S);
+    if (!cur.bot || S.phase === 'turn') return cur;
+    return C.getPlayer(S, S.lastHumanId) || E.humans(S)[0] || cur;
+  }
+
   function renderGame() {
-    const p = C.currentPlayer(S);
+    const p = viewPlayer();
     const s = C.summarize(S, p);
     const econ = econInfo();
     const md = mood(S.market.fear);
@@ -396,6 +416,7 @@
     const tabs = [
       ['month', '📬 This Month', open],
       ['market', '📈 Stocks'],
+      ['options', '🎯 Options & Shorts'],
       ['portfolio', '🏠 Portfolio'],
       ['debt', '💳 Debt & Budget'],
       ['standings', '🏆 Standings'],
@@ -436,7 +457,7 @@
       return `<div class="chip ${cur ? 'current' : ''} ${p.finished ? 'finished' : ''}" style="--pc:${p.color}">
         <span class="chip-av">${esc(p.emoji)}</span>
         <div class="chip-body">
-          <div class="chip-name">${esc(p.name)}${p.finished ? ` · 🏆 #${p.place}` : cur ? ' · now playing' : ''}</div>
+          <div class="chip-name">${esc(p.name)}${p.bot ? ' 🤖' : ''}${p.finished ? ` · 🏆 #${p.place}` : cur ? ' · now playing' : ''}</div>
           <div class="mini-meter"><div style="width:${Math.min(100, s.progress * 100).toFixed(1)}%"></div></div>
           <div class="chip-sub">${pct(Math.min(9.99, s.progress), 0)} free · ${compact(s.netWorth)} net worth</div>
         </div></div>`;
@@ -446,7 +467,7 @@
   function renderTurnBar(p) {
     const req = S.turn.cards.find((c) => c.required && !c.resolved);
     const deals = S.turn.cards.filter((c) => c.kind === 'deal' && !c.resolved).length;
-    const hint = req ? `⚠️ Decide how to pay for “${esc(req.title)}” first`
+    const hint = req ? (req.type === 'expense' ? `⚠️ Decide how to pay for “${esc(req.title)}” first` : `⚠️ Make a decision on “${esc(req.title)}” first`)
       : deals ? `🤝 ${plural(deals, 'deal')} still on the table — they expire when you end your turn`
       : 'Trade stocks, pay off debt or review your portfolio — then end your turn.';
     return `<div class="turnbar" style="--pc:${p.color}">
@@ -468,12 +489,20 @@
     if (p.karmaTurns > 0) badges.push(['good', `😇 Good karma · ${plural(p.karmaTurns, 'more turn')}`]);
     for (const g of p.sideGigs) badges.push(['neutral', `🛠️ ${g.title} · ${g.turnsLeft} left`]);
     badges.push(['neutral', p.ownsHome ? '🏠 Homeowner' : '🔑 Renter']);
+    const rel = p.relationship;
+    if (rel && rel.status === 'dating') badges.push(['good', `💕 Dating ${rel.partner.emoji} ${rel.partner.name}`]);
+    else if (rel && rel.status === 'married') badges.push(['good', `💍 Married to ${rel.partner.emoji} ${rel.partner.name}`]);
+    else badges.push(['neutral', rel && rel.divorces ? '💔 Single (divorced)' : '🙋 Single']);
     if (p.children) badges.push(['neutral', `👶 ${plural(p.children, 'kid')}`]);
+    if (p.network && p.network.club) badges.push(['good', `🥂 ${p.network.club.name}`]);
+    if (p.network && p.network.conferenceTurns > 0) badges.push(['good', `🎤 Conference contacts · ${plural(p.network.conferenceTurns, 'turn')}`]);
+    const nOpts = (p.options || []).length, nShorts = Object.keys(p.shorts || {}).length;
+    if (nOpts || nShorts) badges.push(['neutral', `🎯 ${[nOpts ? plural(nOpts, 'option') : '', nShorts ? plural(nShorts, 'short') : ''].filter(Boolean).join(' · ')}`]);
     const progress = Math.min(1, s.progress);
     const ex = ui.expand;
     const passiveRows = [
       ['Dividends', s.dividends], ['Real estate', s.realEstate], ['Businesses', s.business],
-      ['Side projects', s.side], ['Interest (notes)', s.interest], ['Collectible upkeep', s.collectibles]
+      ['Side projects', s.side], ['Interest (notes)', s.interest], ['Collectible upkeep', s.collectibles], ['Short positions (fees)', s.shortCarry]
     ].filter(([, v]) => Math.abs(v) >= 0.5);
     const livingRows = D.EXPENSES.map((cat) => [cat.id === 'housing' ? (p.ownsHome ? 'Housing (taxes, insurance, upkeep)' : 'Housing (rent)') : cat.label, p.expenses[cat.id]]);
     return `<div class="card statement" style="--pc:${p.color}">
@@ -500,7 +529,10 @@
         <div class="fsec">Monthly expenses</div>
         <button class="frow toggle" data-action="toggle" data-key="living" aria-expanded="${!!ex.living}"><span>${ex.living ? '▾' : '▸'} Living expenses</span><span class="num">${money(s.living)}</span></button>
         ${ex.living ? `<div class="sub-rows">${livingRows.map(([l, v]) => row(esc(l), money(v), 'sub')).join('')}</div>` : ''}
-        ${s.children ? row(`Children (${p.children})`, money(s.children)) : ''}
+        ${s.partner ? row(`${esc(p.relationship.partner.name)} pays half ${tip('Married couples split the household bills — living expenses and the mortgage on your home — so you pay half.')}`, `−${money(s.partner)}`, 'pos') : ''}
+        ${s.children ? row(`Children (${p.children})${p.childShare < 1 ? ' — your half' : ''}`, money(s.children)) : ''}
+        ${s.dating ? row(`Dating ${esc(p.relationship.partner.name)}`, money(s.dating)) : ''}
+        ${s.dues ? row('Networking club dues', money(s.dues)) : ''}
         <button class="frow toggle" data-action="toggle" data-key="debt" aria-expanded="${!!ex.debt}"><span>${ex.debt ? '▾' : '▸'} Debt payments</span><span class="num">${money(s.debt)}</span></button>
         ${ex.debt ? `<div class="sub-rows">${p.debts.length ? p.debts.map((d) => row(esc(d.name), money(d.payment), 'sub')).join('') : '<div class="frow sub muted"><span>Debt-free! 🎉</span></div>'}</div>` : ''}
         ${row('Total expenses', money(s.expenses), 'total')}
@@ -513,6 +545,7 @@
   function renderTab(p, s) {
     switch (ui.tab) {
       case 'market': return renderMarket(p, s);
+      case 'options': return renderOptions(p, s);
       case 'portfolio': return renderPortfolio(p, s);
       case 'debt': return renderDebt(p, s);
       case 'standings': return renderStandings();
@@ -549,6 +582,9 @@
       if (c.type === 'refi' && ch.id === 'accept' && p.cash < c.data.fee) { disabled = true; why = 'Not enough cash'; }
       if (c.type === 'expand' && ch.id === 'invest' && p.cash < c.data.cost) { disabled = true; why = 'Not enough cash'; }
       if (c.type === 'deal' && ch.id === 'buy' && p.cash < c.deal.cash) { disabled = true; why = 'Not enough cash'; }
+      if (c.type === 'conference' && ch.id === 'attend' && p.cash < c.data.cost) { disabled = true; why = 'Not enough cash'; }
+      if (c.type === 'club' && ch.id === 'join' && p.cash < c.data.joinFee) { disabled = true; why = 'Not enough cash for the joining fee'; }
+      if (c.type === 'propose' && ch.id === 'cash' && p.cash < c.data.ring + c.data.wedding) { disabled = true; why = 'Not enough cash'; }
       return `<button class="btn ${ch.style === 'primary' ? 'primary' : 'ghost'} sm" data-action="choose" data-card="${c.id}" data-choice="${ch.id}" ${disabled ? `disabled data-tip="${why}"` : ''}>${esc(ch.label)}</button>`;
     }).join('');
   }
@@ -672,6 +708,7 @@
       const sec = m.securities[id];
       const h = p.holdings[id];
       const ch = sec.prevPrice ? sec.price / sec.prevPrice - 1 : 0;
+      const yr = M.periodReturn(sec, 12);
       const value = h ? h.shares * sec.price : 0;
       const gain = h ? value - h.costBasis : 0;
       const y = M.currentYield(sec);
@@ -679,7 +716,8 @@
         <td><button class="sec-link" data-action="stock-detail" data-id="${id}"><span class="sec-icon" aria-hidden="true">${esc(sec.icon)}</span><span><b>${esc(sec.ticker)}</b> <span class="sec-name">${esc(sec.name)}</span><br><span class="muted small">${esc(sec.sector)}</span></span></button></td>
         <td class="num">${money(sec.price, 2)}</td>
         <td class="num ${toneOf(ch)}">${spct(ch)}</td>
-        <td class="spark-cell">${sparkline(sec.history.slice(-24))}</td>
+        <td class="num ${toneOf(yr)}"><b>${spct(yr)}</b></td>
+        <td class="spark-cell">${sparkline(sec.history.slice(-13))}</td>
         <td>${riskDots(sec)}</td>
         <td class="num">${y > 0 ? `${pct(y)}<br><span class="muted small">${money(sec.div, 3)}/sh/mo</span>` : '<span class="muted">—</span>'}</td>
         <td class="num">${h ? `${h.shares.toLocaleString('en-US')} sh<br><span class="small">${money(value)} <span class="${toneOf(gain)}">(${spct(h.costBasis ? gain / h.costBasis : 0, 0)})</span></span>` : '<span class="muted">—</span>'}</td>
@@ -692,7 +730,7 @@
       <div class="card-head"><h3>📈 Stock market</h3><div class="muted small">Cash: <b>${money(p.cash)}</b> · Stocks: <b>${money(s.stocksValue)}</b> · Dividends: <b>${money(s.dividends)}/mo</b></div></div>
       <p class="muted small">Prices update once a month, after every player has had a turn — so this month's prices are the same for everyone. Click any investment for its full chart and risk statistics. ${md.icon} Market mood is <b>${md.label.toLowerCase()}</b>.</p>
       <div class="table-wrap"><table class="data market">
-        <thead><tr><th>Investment</th><th class="num">Price</th><th class="num">1 mo ${tip('Price change since last month.')}</th><th>2-year trend</th><th>Risk ${tip('Based on volatility: how much the price typically swings. More dots = bigger swings, both up and down.')}</th><th class="num">Dividend ${tip('Dividend yield: yearly dividends ÷ price. Paid to you every payday as passive income.')}</th><th class="num">You own</th><th>Trade</th></tr></thead>
+        <thead><tr><th>Investment</th><th class="num">Price</th><th class="num">1 mo ${tip('Price change since last month.')}</th><th class="num">1 yr ${tip('Price change over the last 12 months — the longer-term trend. (Dividends are paid on top.)')}</th><th>1-year trend</th><th>Risk ${tip('Based on volatility: how much the price typically swings. More dots = bigger swings, both up and down.')}</th><th class="num">Dividend ${tip('Dividend yield: yearly dividends ÷ price. Paid to you every payday as passive income.')}</th><th class="num">You own</th><th>Trade</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
     </div>
     <div class="card learn-inline"><h3>🎓 Reading the market</h3>
@@ -742,7 +780,8 @@
     const trade = S.phase === 'turn' && !p.finished ? `<div class="trade-row"><input type="number" min="1" step="1" inputmode="numeric" class="qty" id="qty-${id}" placeholder="Shares" aria-label="Shares">
       <button class="btn primary" data-action="buy" data-id="${id}">Buy</button><button class="btn ghost" data-action="max-buy" data-id="${id}">Max</button>
       ${h ? `<button class="btn" data-action="sell" data-id="${id}">Sell</button><button class="btn ghost" data-action="max-sell" data-id="${id}">All</button>` : ''}
-      <span class="muted small">Cash ${money(p.cash)}</span></div>` : '';
+      <span class="muted small">Cash ${money(p.cash)}</span></div>
+      <div class="trade-row"><button class="btn ghost sm" data-action="trade-options" data-id="${id}">🎯 Trade options or short ${esc(sec.ticker)}</button></div>` : '';
     return {
       title: `${sec.name} (${sec.ticker})`, icon: sec.icon, wide: true, dismissible: true,
       body: `<p class="muted">${esc(sec.sector)} · ${money(sec.price, 2)} per share</p>
@@ -755,6 +794,113 @@
     };
   }
 
+  // ---------------------------------------------------------------- Options & short selling
+  const KIND_LABELS = { call: '📈 Call', put: '📉 Put', straddle: '↕️ Straddle', short: '🔻 Short sell' };
+  const KIND_HELP = {
+    call: 'The right to BUY 100 shares at the strike price until expiry. Pays off if the price rises above the strike.',
+    put: 'The right to SELL 100 shares at the strike price until expiry. Pays off if the price falls below the strike — often used as insurance.',
+    straddle: 'A call and a put at the same strike. Pays off if the price makes a big move in EITHER direction; loses if it sits still.',
+    short: 'Borrow shares and sell them now, hoping to buy them back cheaper later. Profits if the price falls — but losses are unlimited if it rises.'
+  };
+
+  function payoffChart(o, sec, q) {
+    const shares = O.CONTRACT; // per contract
+    const spread = Math.min(0.8, Math.max(0.3, 2.5 * q.sigma * Math.sqrt(q.T)));
+    const lo = Math.max(0.01, sec.price * (1 - spread)), hi = sec.price * (1 + spread);
+    const values = [];
+    for (let i = 0; i <= 40; i++) {
+      const x = lo + (hi - lo) * i / 40;
+      values.push({ x, y: (O.intrinsic(o.kind, x, q.strike) - q.ask) * shares });
+    }
+    return `<div class="muted small">Profit or loss per contract if held to expiry, by ${esc(sec.ticker)}'s price that month (today ${money(sec.price, 2)}):</div>` + lineChart('payoff', [{ name: 'Profit / loss per contract', color: D.COLORS[2], values }], {
+      label: 'Profit or loss at expiry by share price', height: 200, area: true,
+      yFmt: (v) => compact(v), xFmt: (x) => `${sec.ticker} at ${money(x, x < 10 ? 2 : 0)}`
+    });
+  }
+
+  function renderOptions(p, s) {
+    const canAct = S.phase === 'turn' && !p.finished;
+    const o = ui.opt;
+    const sec = S.market.securities[o.sec] || S.market.securities.idx;
+    const secSelect = `<select data-opt="sec" aria-label="Security">${S.market.order.map((id) => {
+      const x = S.market.securities[id];
+      return `<option value="${id}" ${id === sec.id ? 'selected' : ''}>${esc(x.icon)} ${esc(x.ticker)} — ${esc(x.name)} · ${money(x.price, 2)}</option>`;
+    }).join('')}</select>`;
+    const kinds = `<div class="seg-control" role="group" aria-label="Strategy">${Object.keys(KIND_LABELS).map((k) => `<button class="btn sm ${o.kind === k ? 'primary' : 'ghost'}" data-action="opt-kind" data-kind="${k}" aria-pressed="${o.kind === k}" data-tip="${esc(KIND_HELP[k])}">${KIND_LABELS[k]}</button>`).join('')}</div>`;
+    let ticket;
+    if (o.kind === 'short') {
+      const marginPS = sec.price * O.SHORT_MARGIN;
+      const callAt = sec.price * (1 + O.SHORT_MARGIN) / O.MAINTENANCE;
+      const feePS = sec.price * O.borrowRate(sec) + sec.div;
+      ticket = `<p>${esc(KIND_HELP.short)}</p>
+        <div class="kv-grid">${kv('Sell price now', money(sec.price, 2))}${kv('Margin deposit', `${money(marginPS, 2)}/share`, '', 'You must set aside 50% of the position\'s value in cash. It is held with the sale proceeds as collateral.')}
+          ${kv('Borrow fee + dividends owed', `${money(feePS, 3)}/share/mo`, '', `The lender charges ${pct(O.borrowRate(sec) * 12, 0)}/yr to borrow this stock${sec.div > 0 ? ', and you must pay them the dividends they miss' : ''}.`)}
+          ${kv('Margin call if the price reaches', money(callAt, 2), 'neg', `About ${spct(callAt / sec.price - 1, 0)} from here. Your broker would force you to buy back every share at that price.`)}
+          ${kv('Most you could short', `${Math.floor(Math.max(0, p.cash) / marginPS).toLocaleString('en-US')} shares`)}</div>
+        ${canAct ? `<div class="trade-row"><input type="number" min="1" step="1" inputmode="numeric" class="qty" id="short-qty" placeholder="Shares" aria-label="Shares to short"><button class="btn primary" data-action="short-sell">Short ${esc(sec.ticker)}</button><span class="muted small">Cash ${money(p.cash)}</span></div>` : ''}`;
+    } else {
+      const strikes = O.strikes(sec);
+      const si = Math.min(o.strike, strikes.length - 1);
+      const K = strikes[si];
+      const q = O.quote(S, sec.id, o.kind, K, o.months);
+      const contracts = Math.max(1, Math.floor(Number(o.contracts) || 1));
+      const dsc = O.describe(q, contracts);
+      const rel = (k) => (Math.abs(k / sec.price - 1) < 0.005 ? 'at the money' : `${spct(k / sec.price - 1, 0)} vs. today`);
+      ticket = `<p>${esc(KIND_HELP[o.kind])}</p>
+        <div class="opt-row">
+          <label class="opt"><span>Strike price ${tip('The price at which the option lets you buy (call) or sell (put) the stock.')}</span><select data-opt="strike">${strikes.map((k, i) => `<option value="${i}" ${i === si ? 'selected' : ''}>${money(k, 2)} (${rel(k)})</option>`).join('')}</select></label>
+          <label class="opt"><span>Expires in</span><select data-opt="months">${O.EXPIRIES.map((m) => `<option value="${m}" ${m === o.months ? 'selected' : ''}>${plural(m, 'month')} (month ${S.round + m})</option>`).join('')}</select></label>
+          <label class="opt"><span>Contracts ${tip('One contract covers 100 shares.')}</span><input type="number" min="1" step="1" inputmode="numeric" class="qty" id="opt-contracts" data-ask="${q.ask}" data-put-max="${o.kind === 'put' ? Math.max(0, K - q.ask) : ''}" value="${contracts}"></label>
+        </div>
+        <div class="kv-grid">${kv('Premium per share', money(q.ask, 2), '', `Fair value by the Black–Scholes formula is ${money(q.fair, 2)}/share; you buy at the ask, slightly above it. If you sell early you get the bid, slightly below.`)}${kv('Per contract (100 shares)', money(q.ask * O.CONTRACT))}
+          ${kv('Total cost', `<span id="opt-total">${money(dsc.cost)}</span>`, 'strong')}${kv('Break-even at expiry', dsc.breakeven.map((b) => money(b, 2)).join(' or '))}
+          ${kv('Most you can lose', `<span id="opt-maxloss">${money(dsc.maxLoss)}</span>`, 'neg')}${kv('Most you can gain', Number.isFinite(dsc.maxGain) ? `<span id="opt-maxgain">${money(dsc.maxGain)}</span>` : 'Unlimited', 'pos')}
+          ${kv('Volatility used', `±${pct(q.sigma, 0)}/yr`, '', 'Higher volatility makes options more expensive: a bigger chance of a big move.')}</div>
+        <div class="note">ℹ️ ${esc(dsc.story)}</div>
+        ${payoffChart(o, sec, q)}
+        ${canAct ? `<div class="trade-row"><button class="btn primary" data-action="buy-option" id="opt-buy">Buy ${esc(sec.ticker)} ${KIND_LABELS[o.kind].split(' ')[1].toLowerCase()}s · <span id="opt-buy-cost">${money(dsc.cost)}</span></button><span class="muted small">Cash ${money(p.cash)}</span></div>` : ''}`;
+    }
+
+    const optRows = (p.options || []).map((x) => {
+      const xs = S.market.securities[x.secId];
+      const bid = O.optionBid(S, x);
+      const pl = bid - x.cost;
+      const left = O.monthsLeft(S, x);
+      const intr = O.intrinsic(x.kind, xs.price, x.strike) * x.shares;
+      return `<tr><td><b>${esc(O.optionLabel(x))}</b><br><span class="muted small">${x.contracts} contract${x.contracts > 1 ? 's' : ''} · ${x.shares.toLocaleString('en-US')} shares · ${esc(xs.ticker)} now ${money(xs.price, 2)}</span></td>
+        <td class="num">${money(x.cost)}</td><td class="num">${money(bid)}</td><td class="num ${toneOf(pl)}"><b>${signed(pl)}</b></td>
+        <td class="num">${money(intr)}</td><td>Month ${x.expiresRound}<br><span class="muted small">${plural(left, 'month')} left</span></td>
+        <td>${canAct ? `<button class="btn sm" data-action="sell-option" data-id="${x.id}">Sell · ${money(bid)}</button>` : ''}</td></tr>`;
+    }).join('');
+    const shortPL = Object.keys(p.shorts || {}).reduce((a, id) => a + p.shorts[id].proceeds - p.shorts[id].shares * S.market.securities[id].price, 0);
+    const shortRows = Object.keys(p.shorts || {}).map((id) => {
+      const sh = p.shorts[id];
+      const xs = S.market.securities[id];
+      const owe = sh.shares * xs.price;
+      const pl = sh.proceeds - owe;
+      return `<tr><td><b>${esc(xs.icon)} ${esc(xs.ticker)}</b><br><span class="muted small">${sh.shares.toLocaleString('en-US')} shares short</span></td>
+        <td class="num">${money(sh.proceeds / sh.shares, 2)}</td><td class="num">${money(xs.price, 2)}</td><td class="num ${toneOf(pl)}"><b>${signed(pl)}</b></td>
+        <td class="num">${money(sh.collateral)}</td><td class="num neg">${money(O.marginCallPrice(sh), 2)}</td>
+        <td class="trade">${canAct ? `<input type="number" min="1" step="1" inputmode="numeric" class="qty" id="cover-${id}" placeholder="Qty" aria-label="Shares to buy back">
+          <div class="trade-btns"><button class="btn sm primary" data-action="cover" data-id="${id}">Buy back</button><button class="btn sm ghost" data-action="cover-all" data-id="${id}" data-tip="Fill in every share">All</button></div>` : ''}</td></tr>`;
+    }).join('');
+
+    return `<div class="card"><div class="card-head"><h3>🎯 Options &amp; short selling</h3><div class="muted small">Cash: <b>${money(p.cash)}</b> · Options: <b>${money(s.optionsValue)}</b> · Shorts P/L: <b class="${toneOf(shortPL)}">${signed(shortPL)}</b></div></div>
+        <p class="muted small">Advanced and risky: these let you bet on prices going up, down, or moving a lot — with leverage. None of it is passive income. Options settle automatically at the payday of the month they expire.</p>
+        <div class="opt-row">${secSelect}${kinds}</div>
+        ${ticket}</div>
+      ${optRows ? `<div class="card"><h3>Your options</h3><div class="table-wrap"><table class="data"><thead><tr><th>Contract</th><th class="num">Paid</th><th class="num">Sell now ${tip('What you would get selling today, at the bid price.')}</th><th class="num">Profit / loss</th><th class="num">Intrinsic ${tip('What the option would pay if it expired right now.')}</th><th>Expires</th><th></th></tr></thead><tbody>${optRows}</tbody></table></div></div>` : ''}
+      ${shortRows ? `<div class="card"><h3>Your short positions</h3><p class="muted small">Each payday you pay borrow fees and any dividends (${money(-s.shortCarry)}/mo total). If a price climbs to its margin-call level, your broker buys the shares back for you at a loss.</p><div class="table-wrap"><table class="data"><thead><tr><th>Stock</th><th class="num">Sold at</th><th class="num">Price now</th><th class="num">Profit / loss</th><th class="num">Collateral</th><th class="num">Margin call at</th><th>Buy back</th></tr></thead><tbody>${shortRows}</tbody></table></div></div>` : ''}
+      <div class="card learn-inline"><h3>🎓 How these work</h3>
+        <ul class="tips">
+          <li><span>📈</span><span><b>Calls</b> rise in value when the stock rises. For a small premium you control 100 shares — leverage that can multiply your money or lose all of it.</span></li>
+          <li><span>📉</span><span><b>Puts</b> rise when the stock falls. Investors buy them as <i>insurance</i> on stocks they own, the way you insure a house.</span></li>
+          <li><span>↕️</span><span><b>Straddles</b> (a call + a put) bet on volatility, not direction — popular before earnings seasons (every third month here).</span></li>
+          <li><span>⌛</span><span><b>Time decay:</b> an option loses value every month the stock doesn't move. That's why most options bought by small investors expire worthless.</span></li>
+          <li><span>🔻</span><span><b>Short selling</b> profits when prices fall, but a stock can rise forever — losses are unlimited, and you pay fees and dividends while you wait.</span></li>
+        </ul></div>`;
+  }
+
   // ---------------------------------------------------------------- Portfolio
   function renderPortfolio(p, s) {
     const canAct = S.phase === 'turn' && !p.finished;
@@ -763,7 +909,7 @@
       const cf = C.propertyCashflow(pr);
       const status = pr.rehabLeft > 0 ? `<span class="badge-pill neutral">🔨 Renovating · ${plural(pr.rehabLeft, 'turn')}</span>` : pr.str ? '<span class="badge-pill neutral">Short-term rental</span>' : '';
       return `<tr><td><b>${esc(pr.icon)} ${esc(pr.name)}</b><br>${status}<span class="muted small">Bought month ${pr.boughtRound} for ${money(pr.purchasePrice)}</span></td>
-        <td class="num">${money(sale.value)}</td><td class="num">${pr.mortgage ? money(pr.mortgage.balance) : '—'}</td><td class="num">${money(sale.value - sale.loan)}</td>
+        <td class="num">${money(sale.value)}${pr.rehabLeft ? '' : `<br><span class="small ${toneOf(sale.value - pr.purchasePrice)}">${spct(sale.value / pr.purchasePrice - 1)} since bought</span>`}</td><td class="num">${pr.mortgage ? money(pr.mortgage.balance) : '—'}</td><td class="num">${money(sale.value - sale.loan)}</td>
         <td class="num">${pr.land ? '—' : money(pr.rehabLeft ? 0 : pr.rent)}</td><td class="num">−${money(pr.rehabLeft ? Math.round(pr.opex * 0.5) : pr.opex)}${pr.mortgage ? `<br><span class="muted small">−${money(pr.mortgage.payment)} mortgage</span>` : ''}</td>
         <td class="num ${toneOf(cf)}"><b>${signed(cf)}</b></td>
         <td>${canAct && !pr.rehabLeft ? `<button class="btn sm" data-action="sell-asset" data-kind="property" data-id="${pr.id}">Sell · net ${money(sale.net)}</button>` : ''}</td></tr>`;
@@ -791,12 +937,10 @@
       { label: 'Businesses', value: s.bizValue - s.bizDebt, color: ALLOC_COLORS.business },
       { label: 'Lending notes', value: s.notesValue, color: ALLOC_COLORS.notes },
       { label: 'Collectibles', value: s.collValue, color: ALLOC_COLORS.collect },
-      { label: 'Your home (equity)', value: s.home - (p.debts.find((d) => d.type === 'mortgage') || { balance: 0 }).balance, color: ALLOC_COLORS.home }
+      { label: 'Your home (equity)', value: s.home - (p.debts.find((d) => d.type === 'mortgage') || { balance: 0 }).balance, color: ALLOC_COLORS.home },
+      { label: 'Options & shorts', value: s.optionsValue + s.shortCollateral - s.shortLiability, color: ALLOC_COLORS.options }
     ]);
-    const mort = p.debts.find((d) => d.type === 'mortgage');
-    const homeCard = p.home ? `<div class="card"><h3>🏡 Your home</h3>
-        <div class="kv-grid">${kv('Estimated value', money(s.home))}${kv('Mortgage owed', mort ? money(mort.balance) : '$0 — paid off!')}${kv('Your equity', money(s.home - (mort ? mort.balance : 0)))}${kv('Monthly cost', `${money((mort ? mort.payment : 0) + p.expenses.housing)}/mo`)}</div>
-        <div class="lesson">💡 Your home counts toward your net worth, but it doesn't pay you — it costs you a mortgage, taxes and upkeep every month. That's why a home is not passive income, even though it can grow in value.</div></div>` : '';
+    const homeCard = renderHousing(p, s, canAct);
     const table = (title, head, body) => (body ? `<div class="card"><h3>${title}</h3><div class="table-wrap"><table class="data"><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>` : '');
     return `<div class="card"><h3>🧭 Where your money is ${tip('Asset allocation: how your wealth is split across types of assets. Spreading it out (diversifying) lowers the risk of one bad event sinking you.')}</h3>
         ${alloc || '<p class="muted">Nothing yet.</p>'}
@@ -808,6 +952,39 @@
       ${table('🚀 Startup investments', ['Company', 'Invested', 'Outcome in', ''], startups)}
       ${table('📜 Lending notes', ['Note', 'Principal', 'Rate', 'Interest', 'Matures in', ''], notes)}
       ${table('💎 Collectibles', ['Item', 'Paid', 'Est. value', 'Upkeep', ''], coll)}`;
+  }
+
+  // ---------------------------------------------------------------- Housing (the home you live in)
+  function renderHousing(p, s, canAct) {
+    const mort = C.homeMortgage(p);
+    const listings = (S.turn && S.turn.playerId === p.id && S.turn.homes) || [];
+    let top;
+    if (p.home) {
+      const sale = C.homeSale(S, p);
+      const change = s.home - p.home.purchasePrice;
+      const rent = Deals.rentFor(s.home);
+      top = `<p><b>${esc(p.home.name || 'Your home')}</b> — you own it${p.home.boughtRound ? ` (bought in month ${p.home.boughtRound})` : ''}.</p>
+        <div class="kv-grid">${kv('Estimated value', money(s.home))}${kv(p.home.boughtRound ? 'Change since you bought it' : 'Change since the game began', `${signed(change)} (${spct(change / p.home.purchasePrice)})`, toneOf(change), 'Your home moves with the regional housing market and with its own neighborhood. It is only a real gain once you sell.')}
+        ${kv('Mortgage owed', mort ? money(mort.balance) : '$0 — paid off!')}${kv('Your equity', money(s.home - (mort ? mort.balance : 0)), '', 'Value minus the mortgage: the part of the house you actually own.')}
+        ${kv('Monthly cost', `${money((mort ? mort.payment : 0) + p.expenses.housing)}/mo`, '', 'Mortgage payment plus property taxes, insurance and upkeep.')}${kv('If you sold today', `${money(sale.net)} after 6% costs${mort ? ' & the mortgage' : ''}`)}</div>
+        ${canAct ? `<div class="btn-row"><button class="btn sm" data-action="sell-home" data-rent="similar" ${sale.net < 0 && p.cash < -sale.net ? 'disabled data-tip="Your home is underwater and you can\'t cover the difference"' : ''}>Sell &amp; rent a similar place (~${money(rent)}/mo)</button>
+          <button class="btn sm ghost" data-action="sell-home" data-rent="smaller" ${sale.net < 0 && p.cash < -sale.net ? 'disabled' : ''}>Sell &amp; rent smaller (~${money(rent * 0.7)}/mo)</button></div>` : ''}`;
+    } else {
+      top = `<p>You rent your home for <b>${money(p.expenses.housing)}/mo</b>${C.isMarried(p) ? ' (split with your spouse)' : ''}. Renting is flexible and has no upkeep surprises, but rent tends to rise and builds no equity.</p>`;
+    }
+    const rows = listings.map((h) => {
+      const opts = Deals.DOWN_OPTIONS.map((dp) => {
+        const t = Deals.homePurchaseTerms(S, p, h, dp);
+        return `<button class="btn sm ${dp === 0.2 ? 'primary' : 'ghost'}" data-action="buy-home" data-id="${h.id}" data-down="${dp}" ${!canAct || t.reason ? `disabled data-tip="${esc(t.reason || 'Not your turn')}"` : `data-tip="${esc(`${money(t.loan)} mortgage at ${t.rate.toFixed(3)}%. DTI after: ${Math.round(t.dti * 100)}%`)}"`}>${pct(dp, 0)} down: ${money(t.down + t.closing)} now · ${money(t.monthly)}/mo</button>`;
+      }).join('');
+      return `<tr><td><b>${esc(h.name)}</b><br><span class="muted small">${{ starter: 'Starter home', similar: 'Similar to now', upgrade: 'Upgrade' }[h.tier]} · taxes &amp; upkeep ${money(h.ownerCosts)}/mo</span></td>
+        <td class="num">${money(h.price)}</td><td><div class="btn-row">${opts}</div></td></tr>`;
+    }).join('');
+    return `<div class="card"><h3>🏡 Where you live</h3>${top}
+      ${rows ? `<h4>Homes for sale this month ${tip('New listings appear every turn. The price includes 3% closing costs on top of the down payment. Smaller down payments come with a higher interest rate.')}</h4>
+        ${p.home ? '<p class="muted small">Buying another home sells your current one first — the money from the sale goes toward the new down payment.</p>' : ''}
+        <div class="table-wrap"><table class="data"><thead><tr><th>Home</th><th class="num">Price</th><th>Cash now · monthly cost (mortgage + taxes &amp; upkeep)</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+      <div class="lesson">💡 <b>Rent vs. buy.</b> Your home counts toward net worth, but it isn't passive income — it costs you every month. Owning builds equity and locks in your payment; renting keeps cash free to invest and lets you move cheaply. Banks usually cap all debt payments at ${pct(Deals.MAX_DTI, 0)} of income ("debt-to-income").</div></div>`;
   }
 
   // ---------------------------------------------------------------- Debt & budget
@@ -855,14 +1032,36 @@
         <div class="kv-grid">${D.EXPENSES.map((cat) => kv(esc(cat.id === 'housing' ? (p.ownsHome ? 'Housing (taxes, insurance, upkeep)' : 'Housing (rent)') : cat.label), money(p.expenses[cat.id]))).join('')}</div>
         ${p.lifestyle > 0 ? `<p>Downshift to a <b>${ds.next.icon} ${ds.next.name}</b> lifestyle: a one-time moving cost of <b>${money(ds.cost)}</b>, then <b>${money(ds.savings)}/mo</b> lower expenses — and a <b>${money(ds.savings * mult())}/mo</b> lower freedom target.</p>
           ${canAct ? `<button class="btn" data-action="downshift" ${ds.reason ? `disabled data-tip="${esc(ds.reason)}"` : ''}>Downshift lifestyle</button>` : ''}` : '<p class="muted">You\'re already living as frugally as possible.</p>'}
-      </div>`;
+      </div>
+      ${renderFamilyNetwork(p, s, canAct)}`;
+  }
+
+  function renderFamilyNetwork(p, s, canAct) {
+    const r = p.relationship;
+    const net = p.network;
+    let rel;
+    if (r.status === 'dating') rel = `You're dating <b>${esc(r.partner.emoji)} ${esc(r.partner.name)}</b> (since month ${r.since}). Dates cost about <b>${money(r.datingCost)}/mo</b>. After a while together, you may get the chance to marry.`;
+    else if (r.status === 'married') rel = `You're married to <b>${esc(r.partner.emoji)} ${esc(r.partner.name)}</b> (since month ${r.since}). ${esc(r.partner.name)} pays half the household bills${C.homeMortgage(p) ? ' (including the mortgage)' : ''} — <b>${money(s.partner)}/mo</b>${p.children ? ` — and half of the children's costs` : ''}.`;
+    else rel = `You're single${r.divorces ? ' (divorced)' : ''}. You might meet someone at any time.`;
+    const level = C.networkLevel(p);
+    const parts = [];
+    if (net.club) parts.push(`a member of the <b>${esc(net.club.name)}</b> (${money(net.club.dues)}/mo)`);
+    if (net.conferenceTurns > 0) parts.push(`riding <b>${plural(net.conferenceTurns, 'more turn')}</b> of conference contacts`);
+    const netText = level
+      ? `You're ${parts.join(' and ')}. Networking level <b>${level}/2</b>: raises are ${pct(0.5 * level, 0)} more likely, promotions ${pct(0.4 * level, 0)} more likely, side gigs come more often, and a layoff would last at most ${plural(MMS.Events.maxJobSearch(p), 'month')} (instead of 6).`
+      : 'No networking right now. Conference and club invitations show up at random while you have a job.';
+    return `<div class="card"><h3>💞 Family &amp; network</h3>
+      <p>${rel}</p>${p.children ? `<p>👶 ${p.children} ${p.children === 1 ? 'child' : 'children'} — ${money(s.children)}/mo${p.childShare < 1 ? ' (your half)' : ''}.</p>` : ''}
+      <p>${netText}</p>
+      ${net.club && canAct ? `<button class="btn sm" data-action="cancel-club">Cancel club membership (save ${money(net.club.dues)}/mo)</button>` : ''}
+      <div class="lesson">💡 Life choices are money choices: dating, a wedding and children all raise your expenses — while a spouse who shares the bills lowers them. Networking costs money up front but can raise your pay for years.</div></div>`;
   }
 
   // ---------------------------------------------------------------- Standings
   function renderStandings() {
-    const rows = E.standings(S).map(({ p, s }, i) => `<tr class="${p.id === C.currentPlayer(S).id ? 'cur' : ''}">
+    const rows = E.standings(S).map(({ p, s }, i) => `<tr class="${p.id === viewPlayer().id ? 'cur' : ''}">
       <td>${p.place ? `🏆 ${p.place}` : i + 1}</td>
-      <td><span class="dot" style="background:${p.color}"></span> ${esc(p.emoji)} <b>${esc(p.name)}</b><br><span class="muted small">${esc(C.jobTitle(p))}</span></td>
+      <td><span class="dot" style="background:${p.color}"></span> ${esc(p.emoji)} <b>${esc(p.name)}</b>${botTag(p)}<br><span class="muted small">${esc(C.jobTitle(p))}</span></td>
       <td class="num">${money(p.cash)}</td><td class="num">${money(s.netWorth)}</td><td class="num">${money(s.passive)}</td><td class="num">${money(s.target)}</td>
       <td><div class="mini-meter wide" style="--pc:${p.color}"><div style="width:${Math.min(100, s.progress * 100).toFixed(1)}%"></div></div><span class="small">${pct(s.progress, 0)}</span></td></tr>`).join('');
     const metrics = { netWorth: ['Net worth', (v) => compact(v)], passive: ['Passive income / mo', (v) => compact(v)], progress: ['Freedom meter', (v) => pct(v, 0)] };
@@ -923,6 +1122,11 @@
       ['🛟', 'Emergency fund', 'Keep 3–6 months of expenses in cash. It turns a layoff or a surprise bill into an inconvenience instead of a credit-card disaster.', `You have ${months.toFixed(1)} months of expenses in cash.`],
       ['📈', 'Lifestyle creep', 'As income rises, spending tends to rise with it — which is why some people with big salaries are still broke. Keeping expenses steady while income grows is a superpower.', `You've spent ${money(p.stats.luxurySpent)} on luxuries this game. Each $100/mo you cut lowers your freedom target by ${money(100 * mult())}/mo.`],
       ['🔄', 'Economic cycles', 'Economies alternate between expansions and recessions. Recessions bring layoffs and falling prices — but also bargains for people with cash ready.', `Right now the economy is ${ec.label.toLowerCase()}: ${ec.desc}`],
+      ['🎯', 'Options', 'An option is a contract: a <b>call</b> gives the right to buy 100 shares at a set "strike" price before it expires; a <b>put</b> gives the right to sell. A small premium controls a lot of stock, so options are leverage. Their price depends on the stock price, the strike, the time left and — most of all — volatility (the Black–Scholes formula).', `A 3-month at-the-money call on ${sec.idx.name} costs about ${money(O.quote(S, 'idx', 'call', O.strikes(sec.idx)[2], 3).ask * 100)} per contract right now.`],
+      ['🔻', 'Short selling', 'Shorting means borrowing shares, selling them, and buying them back later — profiting if the price falls. Because a price can rise without limit, so can a short seller\'s losses. Brokers demand collateral and issue margin calls when a short goes against you.', ''],
+      ['🏡', 'Rent vs. buy', 'Owning builds equity and fixes your payment, but costs a down payment, closing costs, upkeep and 6% to sell. Renting is flexible and keeps cash free to invest. Neither is always better — compare the monthly cost AND what your cash could earn elsewhere.', p.home ? `Your home is worth about ${money(s.home)}; renting a similar place would cost about ${money(Deals.rentFor(s.home))}/mo.` : `You rent for ${money(p.expenses.housing)}/mo.`],
+      ['💼', 'Your earning power', 'Your salary is often your biggest asset early on. Small raises compound over a career, and networking, skills and relationships ("human capital") are investments that can pay off for decades.', `You've had ${plural(p.stats.promotions, 'promotion')} and ${plural(p.stats.raises || 0, 'raise')} this game.`],
+      ['💞', 'Money & relationships', 'Couples who share a household split rent, utilities and groceries — a big financial advantage. But weddings, children and especially divorce are some of life\'s biggest expenses, and money stress is a leading cause of breakups. Talk about money early.', p.relationship.status === 'married' ? `Your spouse covers ${money(s.partner)}/mo of household bills.` : ''],
       ['🎰', 'Speculation vs. investing', 'Investing means buying something for the income or value it produces. Speculating means betting on a price move — crypto, penny stocks, hot tips. Speculation can pay off, but it isn\'t a plan.', '']
     ];
     return `<div class="card"><h3>🎓 Money lessons</h3><p class="muted">The ideas behind the game, with your own numbers plugged in.</p></div>
@@ -960,7 +1164,7 @@
     if (c.kind === 'deal') body += dealBody(c.deal, p) + affordHelp(c, p);
     if (c.type === 'expense') body += `<div class="note">You have ${money(p.cash)} in cash.${p.cash < c.data.cost ? ' Not enough — it will have to go on a credit card.' : ''}</div>`;
     if (c.lesson) body += `<div class="lesson">💡 ${esc(c.lesson)}</div>`;
-    const kindLabel = c.kind === 'deal' ? '🤝 Deal opportunity' : c.required ? 'Unavoidable expense' : '';
+    const kindLabel = c.kind === 'deal' ? '🤝 Deal opportunity' : c.type === 'expense' ? 'Unavoidable expense' : c.required ? 'You must decide' : '';
     return {
       title: c.title, icon: c.icon, tone: c.tone, wide: c.kind === 'deal',
       dismissible: !c.required,
@@ -974,9 +1178,27 @@
     const p = C.currentPlayer(S);
     return {
       title: `Payday — Month ${S.round}`, icon: '💵', tone: pd.net >= 0 ? 'good' : 'bad', dismissible: false,
-      body: `<p class="muted">${esc(p.emoji)} ${esc(p.name)} · cash ${money(pd.before)} → <b>${money(pd.after)}</b></p>${renderPaydayLines(pd)}`,
+      body: `<p class="muted">${esc(p.emoji)} ${esc(p.name)} · cash ${money(pd.before)} → <b>${money(pd.after)}</b></p>${renderPaydayLines(pd)}${renderBotRecap()}`,
       footer: '<button class="btn primary" data-action="payday-ok">Continue</button>'
     };
+  }
+
+  /** What the computer opponents did since this person's last turn. */
+  function renderBotRecap() {
+    const me = C.currentPlayer(S).id;
+    const list = ui.botRecap.filter((r) => r.seq > (ui.recapSeen[me] || 0));
+    if (!list.length) return '';
+    const shown = list.slice(-8);
+    const items = shown.map((r) => {
+      const p = C.getPlayer(S, r.playerId);
+      if (!p) return '';
+      const lines = r.items.slice(0, 6).map((it) => `<li class="tone-${esc(it.tone || 'neutral')}">${esc(it.text.length > 140 ? `${it.text.slice(0, 137)}…` : it.text)}</li>`).join('');
+      const more = r.items.length > 6 ? `<li class="muted">…and ${r.items.length - 6} more</li>` : '';
+      const status = r.won ? '🏆 reached financial freedom!' : `${pct(Math.min(9.99, r.progress || 0), 0)} free · ${compact(r.netWorth || 0)} net worth`;
+      return `<div class="recap" style="--pc:${p.color}"><div class="recap-head">${esc(p.emoji)} <b>${esc(p.name)}</b> 🤖 <span class="muted small">Month ${r.round} · payday ${signed(r.net)} · ${status}</span></div>
+        ${lines || more ? `<ul>${lines}${more}</ul>` : '<div class="muted small">A quiet month — no big moves.</div>'}</div>`;
+    }).join('');
+    return `<h3 class="recap-title">🤖 Your rivals' turns</h3>${list.length > shown.length ? `<p class="muted small">Showing the last ${shown.length} of ${list.length} turns.</p>` : ''}${items}`;
   }
 
   function handoffScreen() {
@@ -1001,7 +1223,7 @@
       const s = C.summarize(S, p);
       const life = C.lifestyleOf(p);
       return `<div class="intro-card" style="--pc:${p.color}">
-        <div class="intro-head"><span class="avatar-lg">${esc(p.emoji)}</span><div><b>${esc(p.name)}</b><div class="muted small">${esc(p.job.icon)} ${esc(p.job.title)} · ${life.icon} ${life.name}</div></div></div>
+        <div class="intro-head"><span class="avatar-lg">${esc(p.emoji)}</span><div><b>${esc(p.name)}</b>${botTag(p)}<div class="muted small">${esc(p.job.icon)} ${esc(p.job.title)} · ${life.icon} ${life.name}</div></div></div>
         ${kv('Salary', `${money(p.job.salary)}/mo`)}${kv('Living expenses', `${money(s.living + s.children)}/mo`)}${kv('Debt payments', `${money(s.debt)}/mo`)}
         ${kv('Cashflow', signed(s.cashflow), toneOf(s.cashflow))}${kv('Starting cash', money(p.cash))}${kv('Total debt', money(s.debtBalance))}
         <div class="small muted">${p.debts.map((d) => `${esc(d.name)} ${money(d.balance)} @ ${d.apr.toFixed(1)}%`).join(' · ') || 'No debts'}</div>
@@ -1027,10 +1249,12 @@
 
   function reportCard(p) {
     const s = C.summarize(S, p);
-    return `<div class="report" style="--pc:${p.color}"><div class="report-head">${esc(p.emoji)} <b>${esc(p.name)}</b> ${p.place ? `· 🏆 #${p.place}` : `· ${pct(s.progress, 0)} free`}</div>
+    return `<div class="report" style="--pc:${p.color}"><div class="report-head">${esc(p.emoji)} <b>${esc(p.name)}</b>${botTag(p)} ${p.place ? `· 🏆 #${p.place}` : `· ${pct(s.progress, 0)} free`}</div>
       <div class="kv-grid">${kv('Net worth', money(s.netWorth))}${kv('Passive income', `${money(s.passive)}/mo`)}${kv('Passive income earned', money(p.stats.passiveEarned))}
       ${kv('Interest paid on debts', money(p.stats.interestPaid))}${kv('Spent on luxuries', money(p.stats.luxurySpent))}${kv('Donated to charity', money(p.stats.donated))}
-      ${kv('Deals bought', String(p.stats.deals))}${kv('Times downsized', String(p.stats.timesDownsized))}${kv('Promotions', String(p.stats.promotions))}</div></div>`;
+      ${kv('Deals bought', String(p.stats.deals))}${kv('Times downsized', String(p.stats.timesDownsized))}${kv('Promotions', String(p.stats.promotions))}${kv('Raises', String(p.stats.raises || 0))}
+      ${p.stats.networkingSpent ? kv('Spent on networking', money(p.stats.networkingSpent)) : ''}${p.stats.weddingSpent ? kv('Spent on the wedding', money(p.stats.weddingSpent)) : ''}${p.stats.datingSpent ? kv('Spent on dates', money(p.stats.datingSpent)) : ''}
+      ${kv('Relationship', p.relationship.status === 'married' ? `Married to ${esc(p.relationship.partner.name)}` : p.relationship.status === 'dating' ? `Dating ${esc(p.relationship.partner.name)}` : 'Single')}${p.children ? kv('Children', String(p.children)) : ''}</div></div>`;
   }
 
   function resultsModal() {
@@ -1046,10 +1270,14 @@
       title = winner.place === 1 ? `${winner.name} wins!` : `${winner.name} takes #${winner.place}!`;
       intro = `<p class="lead">${esc(winner.emoji)} <b>${esc(winner.name)}</b> reached financial freedom in month ${S.winners[S.winners.length - 1].round}${winner.place === 1 ? ' — first to escape the 9-to-5!' : '.'}</p>`;
     } else { title = 'Game over'; intro = ''; }
+    if (winner && winner.bot && winner.place === 1) intro += `<p>Beaten by a bot! ${esc(winner.name)} plays as <b>${esc(botLevel(winner).name)}</b>: ${esc(botLevel(winner).desc)} Compare its report card with yours below.</p>`;
     const remaining = E.activePlayers(S).length;
+    const onlyBots = !over && !E.activeHumans(S).length;
     const footer = over
       ? '<button class="btn primary" data-action="new-game">New game</button><button class="btn ghost" data-action="review">Look at the board</button>'
-      : `<button class="btn primary" data-action="continue">Keep playing for #${S.winners.length + 1}${remaining === 1 ? ' (solo)' : ''}</button><button class="btn ghost" data-action="new-game">New game</button>`;
+      : onlyBots
+        ? `<button class="btn primary" data-action="continue">Let the bots race for #${S.winners.length + 1} 🤖</button><button class="btn ghost" data-action="finish-game">End the game here</button>`
+        : `<button class="btn primary" data-action="continue">Keep playing for #${S.winners.length + 1}${remaining === 1 ? ' (solo)' : ''}</button><button class="btn ghost" data-action="new-game">New game</button>`;
     return {
       title, icon: '🏆', tone: 'good', wide: true, dismissible: false,
       body: `${confetti()}${intro}<h3>Final report cards</h3><div class="report-grid">${rows.map(({ p }) => reportCard(p)).join('')}</div>
@@ -1072,7 +1300,7 @@
         <h3>🎯 Goal</h3><p>Be the first to reach <b>financial freedom</b>: passive income (from investments) of at least <b>2× your total monthly expenses</b> (living costs + children + debt payments). When you get there, you quit your job and win. Other players can keep playing for 2nd, 3rd…</p>
         <h3>🔁 A turn</h3><ol>
           <li><b>Payday.</b> You collect your salary (unless you've been downsized) plus all passive income, then pay living expenses and debt payments. If you can't cover your bills, the shortfall goes on a credit card.</li>
-          <li><b>Pop-ups.</b> Random events appear — not every turn: deals, luxury temptations, emergencies, layoffs (1–6 turns without pay), promotions, side gigs, buyer offers and charity drives.</li>
+          <li><b>Pop-ups.</b> Random events appear — not every turn: deals, luxury temptations, emergencies, layoffs (1–6 turns without pay), raises and promotions, side gigs, buyer offers, networking invitations, dates and family news, charity drives — plus announcements when a startup you backed succeeds or fails.</li>
           <li><b>Act.</b> Buy deals, trade stocks, pay off debt, borrow from the bank, sell assets or downshift your lifestyle — as much as you like.</li>
           <li><b>End your turn</b> and pass the device. When everyone has played, the month ends and the market moves.</li></ol>
         <h3>💼 Your starting life</h3><p>Each player gets a random job (salary), lifestyle (expenses), savings and a mix of debts — credit cards, auto loans, student loans, a mortgage and more. Paying a debt off removes its monthly payment, which lowers your expenses <i>and</i> your freedom target.</p>
@@ -1081,6 +1309,11 @@
           <li><b>Real estate</b> — condos, houses, duplexes, triplexes and fourplexes, apartment complexes, vacation rentals, fixer-uppers, commercial buildings and land. Most use a mortgage; check the cashflow after all costs.</li>
           <li><b>Businesses</b> — vending routes, ATMs, food trucks, laundromats, franchises, partnerships and more. Some take a few turns to launch before you see their real profit.</li>
           <li><b>Side projects, startups, lending notes and collectibles</b> — from cheap lottery tickets to steady interest.</li></ul>
+        <h3>🏡 Your home</h3><p>Homes rise and fall in value with the regional housing market <i>and</i> their own neighborhood. Homeowners can sell (6% selling costs, then the mortgage is repaid) and move into a rental — or buy one of the homes listed each turn in the Portfolio tab. Buying needs a down payment (5–20%) plus 3% closing costs, and the bank caps all your debt payments at 43% of your income.</p>
+        <h3>📈 Raises &amp; 🤝 networking</h3><p>Raises are small, permanent bumps in pay (2–5%); promotions are bigger (8–20%) and come with a new title. Networking conferences (a one-time fee, helps for 12 months) and networking clubs (a joining fee plus monthly dues, cancel any time) make raises, promotions and side gigs more likely and cut the longest possible job search after a layoff from 6 months to 4 (one of them) or 2 (both).</p>
+        <h3>💞 Relationships</h3><p>Everyone starts single. You may meet someone and start dating (dates cost money each month). After a while, you may get the chance to marry — with a big wedding paid in cash or financed, or a simple one. A spouse pays half of the household bills. Married couples may decide to have children (each parent pays half), and marriages can hit trouble: counseling often helps, but a divorce costs legal fees plus half your cash and stocks. Dating couples can also simply break up.</p>
+        <h3>🎯 Options &amp; short selling</h3><p>In the Options &amp; Shorts tab you can buy <b>calls</b> (bet on a rise), <b>puts</b> (bet on a fall, or insure shares you own) and <b>straddles</b> (bet on a big move either way). One contract covers 100 shares; options expire in 1, 3 or 6 months and pay out automatically at that month's payday if they finish in the money. <b>Short selling</b> borrows shares to sell now and buy back later: you need a 50% margin deposit, pay monthly borrow fees and dividends, and get a forced buy-back (margin call) if the price rises about 15%.</p>
+        <h3>🤖 Computer opponents</h3><p>Playing alone? Add computer opponents on the setup screen. They follow exactly the same rules and get their own random cards. <b>Easy</b> bots spend freely and chase hot tips, <b>Normal</b> bots save steadily and buy solid deals, and <b>Hard</b> bots run a disciplined investor playbook. Their turns are played instantly; your payday screen shows what they did since your last turn.</p>
         <h3>😇 Charity</h3><p>Sometimes a charity drive asks for 10% of your monthly income. Donating gives you good karma for 3 turns: better deals, more good events, fewer bad ones, and lower odds of being downsized.</p>
         <h3>🏦 The bank</h3><p>You can borrow in $1,000 steps as long as the payment fits within 60% of your monthly cashflow. Borrowed money raises your expenses (and freedom target), so use it for assets that pay more than they cost.</p>
         <h3>🧠 Tips</h3><ul><li>Kill high-interest credit-card debt early — it's a guaranteed return.</li><li>Keep an emergency fund so layoffs and emergencies don't snowball into debt.</li><li>Look for deals with strong cash-on-cash returns and positive cashflow.</li><li>Growth stocks don't pay your bills; sell winners and buy income-producing assets.</li><li>Watch the <b>Money coach</b> in the This Month tab and the <b>Learn</b> tab.</li></ul>
@@ -1159,11 +1392,21 @@
   // ================================================================ flow
   /** Show "pass the device" whenever the device has to change hands. */
   function useHandoff() {
-    return S.settings.handoff && S.players.length > 1 && S.lastPlayerId !== C.currentPlayer(S).id;
+    const last = S.lastHumanId !== undefined ? S.lastHumanId : S.lastPlayerId;
+    return S.settings.handoff && E.humans(S).length > 1 && last !== C.currentPlayer(S).id;
   }
 
   function autoAdvance() {
-    if (ui.screen === 'game' && S && S.phase === 'handoff' && !ui.intro && !useHandoff()) {
+    if (ui.screen !== 'game' || !S || ui.intro) return;
+    // Computer opponents play their turns instantly; their recap shows at the next person's payday.
+    if (S.phase === 'handoff' && E.isBot(C.currentPlayer(S))) {
+      const r = E.runBots(S);
+      for (const rc of r.recaps) ui.botRecap.push(Object.assign(rc, { seq: ++ui.recapSeq }));
+      if (ui.botRecap.length > 200) ui.botRecap.splice(0, ui.botRecap.length - 200);
+      if (r.stalled && !E.activeHumans(S).length) E.finishGame(S);
+      save();
+    }
+    if (S.phase === 'handoff' && !useHandoff()) {
       E.beginTurn(S);
       ui.showPayday = true;
       ui.tab = 'month';
@@ -1195,9 +1438,10 @@
 
   function startGame() {
     const st = ui.setup;
-    const players = st.players.map((pl, i) => ({ name: (pl.name || '').trim() || `Player ${i + 1}`, emoji: pl.emoji, color: pl.color }));
+    if (!st.players.some((pl) => !pl.bot)) return toast('At least one person has to play.', 'bad');
+    const players = st.players.map((pl, i) => ({ name: (pl.name || '').trim() || `Player ${i + 1}`, emoji: pl.emoji, color: pl.color, bot: pl.bot || null }));
     S = E.createGame({ players, seed: st.seed, timeLimit: Number(st.timeLimit), handoff: !!st.handoff, freedomMultiple: Number(st.multiple) });
-    ui.screen = 'game'; ui.intro = true; ui.tab = 'month'; ui.review = false; ui.showPayday = false; ui.modal = null;
+    ui.screen = 'game'; ui.intro = true; ui.tab = 'month'; ui.review = false; ui.showPayday = false; ui.modal = null; ui.botRecap = []; ui.recapSeen = {}; ui.recapSeq = 0;
     saveSetup();
     save();
     refresh();
@@ -1219,6 +1463,11 @@
     return el ? Number(el.value) : 0;
   }
 
+  function freeBotName() {
+    const used = new Set(ui.setup.players.map((p) => p.name));
+    return AI.BOT_NAMES.find((n) => !used.has(n)) || `Bot ${ui.setup.players.length + 1}`;
+  }
+
   // ================================================================ actions
   const actions = {
     'setup-add'() {
@@ -1227,7 +1476,17 @@
       ui.setup.players.push({ name: `Player ${i + 1}`, emoji: D.AVATARS[i % D.AVATARS.length], color: D.COLORS.find((c) => !used.has(c)) || D.COLORS[i % D.COLORS.length] });
       saveSetup(); refresh();
     },
-    'setup-remove'(el) { ui.setup.players.splice(Number(el.dataset.i), 1); saveSetup(); refresh(); },
+    'setup-add-bot'() {
+      const used = new Set(ui.setup.players.map((p) => p.color));
+      const i = ui.setup.players.length;
+      ui.setup.players.push({ name: freeBotName(), emoji: D.AVATARS[i % D.AVATARS.length], color: D.COLORS.find((c) => !used.has(c)) || D.COLORS[i % D.COLORS.length], bot: 'normal' });
+      saveSetup(); refresh();
+    },
+    'setup-remove'(el) {
+      const pl = ui.setup.players[Number(el.dataset.i)];
+      if (pl && !pl.bot && setupHumans() <= 1) return toast('At least one person has to play.', 'bad');
+      ui.setup.players.splice(Number(el.dataset.i), 1); saveSetup(); refresh();
+    },
     'setup-emoji'(el) {
       const pl = ui.setup.players[Number(el.dataset.i)];
       pl.emoji = D.AVATARS[(D.AVATARS.indexOf(pl.emoji) + 1) % D.AVATARS.length];
@@ -1251,8 +1510,9 @@
     },
     'discard-save'() { confirmModal('Discard saved game?', '<p>This can\'t be undone.</p>', 'Discard', () => { clearSave(); refresh(); }, 'bad'); refresh(); },
     'intro-ok'() { ui.intro = false; ui.modal = null; refresh(); },
-    'start-turn'() { E.beginTurn(S); ui.showPayday = true; ui.tab = 'month'; ui.modal = null; save(); refresh(); window.scrollTo({ top: 0 }); },
-    'payday-ok'() { ui.showPayday = false; ui.modal = null; refresh(); },
+    'start-turn'() { if (S.phase !== 'handoff') return refresh(); E.beginTurn(S); ui.showPayday = true; ui.tab = 'month'; ui.modal = null; save(); refresh(); window.scrollTo({ top: 0 }); },
+    'payday-ok'() { ui.showPayday = false; ui.recapSeen[C.currentPlayer(S).id] = ui.recapSeq; ui.modal = null; refresh(); },
+    'finish-game'() { E.finishGame(S); ui.modal = null; save(); refresh(); },
     tab(el) { ui.tab = el.dataset.tab; refresh(); },
     toggle(el) { ui.expand[el.dataset.key] = !ui.expand[el.dataset.key]; refresh(); },
     choose(el) {
@@ -1336,6 +1596,53 @@
       confirmModal(`Sell ${name}?`, `<div class="kv-grid">${detail}</div>`, 'Sell', () => after(E.sellAsset(S, kind, id)));
       refresh();
     },
+    'opt-kind'(el) { ui.opt.kind = el.dataset.kind; refresh(); },
+    'trade-options'(el) { ui.opt.sec = el.dataset.id; ui.opt.strike = 2; ui.tab = 'options'; ui.modal = null; refresh(); },
+    'buy-option'() {
+      const sec = S.market.securities[ui.opt.sec];
+      const strikes = O.strikes(sec);
+      const K = strikes[Math.min(ui.opt.strike, strikes.length - 1)];
+      const n = qtyValue('opt-contracts');
+      ui.opt.contracts = n || 1;
+      after(E.buyOption(S, ui.opt.sec, ui.opt.kind, K, ui.opt.months, n));
+    },
+    'sell-option'(el) { after(E.sellOption(S, el.dataset.id)); },
+    'short-sell'() { after(E.shortSell(S, ui.opt.sec, qtyValue('short-qty'))); },
+    cover(el) { after(E.coverShort(S, el.dataset.id, qtyValue(`cover-${el.dataset.id}`))); },
+    'cover-all'(el) {
+      const sh = C.currentPlayer(S).shorts[el.dataset.id];
+      const input = document.getElementById(`cover-${el.dataset.id}`);
+      if (input && sh) { input.value = sh.shares; input.focus(); }
+    },
+    'sell-home'(el) {
+      const p = C.currentPlayer(S);
+      const rent = el.dataset.rent;
+      const sale = C.homeSale(S, p);
+      const newRent = C.roundTo(Deals.rentFor(sale.value) * (rent === 'smaller' ? 0.7 : 1), 5);
+      const m = C.homeMortgage(p);
+      const oldCost = (m ? m.payment : 0) + p.expenses.housing;
+      confirmModal('Sell your home?', `<div class="kv-grid">${kv('Market value', money(sale.value))}${kv('Selling costs (6%)', `−${money(sale.fees)}`)}${sale.loan ? kv('Pay off mortgage', `−${money(sale.loan)}`) : ''}${kv('You receive', money(sale.net), 'strong')}
+        ${kv('Housing cost now', `${money(oldCost)}/mo`)}${kv(rent === 'smaller' ? 'New rent (smaller place)' : 'New rent (similar place)', `${money(newRent)}/mo`)}</div>
+        <p class="muted small">You still need somewhere to live: you'll move into a rental. You can buy another home later from the listings.</p>`, 'Sell & move', () => after(E.sellHome(S, rent)));
+      refresh();
+    },
+    'buy-home'(el) {
+      const p = C.currentPlayer(S);
+      const h = S.turn.homes.find((x) => x.id === el.dataset.id);
+      if (!h) return;
+      const dp = Number(el.dataset.down);
+      const t = Deals.homePurchaseTerms(S, p, h, dp);
+      confirmModal(`Buy the ${h.name}?`, `<div class="kv-grid">${kv('Price', money(h.price))}${t.sale ? kv('Your current home sells for (net)', money(t.sale.net), 'pos') : ''}${kv(`Down payment (${pct(dp, 0)})`, money(t.down))}${kv('Closing costs (3%)', money(t.closing))}
+        ${kv('Mortgage', `${money(t.loan)} at ${t.rate.toFixed(3)}%, 30 yrs`)}${kv('Mortgage payment', `${money(t.payment)}/mo`)}${kv('Taxes, insurance & upkeep', `${money(h.ownerCosts)}/mo`)}${kv('Debt-to-income after', pct(t.dti, 0))}</div>
+        ${dp < 0.2 ? '<p class="muted small">With less than 20% down, lenders charge a higher rate because the loan is riskier.</p>' : ''}`, 'Buy this home', () => after(E.buyHome(S, h.id, dp)));
+      refresh();
+    },
+    'cancel-club'() {
+      const club = C.currentPlayer(S).network.club;
+      if (!club) return;
+      confirmModal('Cancel your membership?', `<p>You'll stop paying ${money(club.dues)}/mo in dues, but lose the networking boost. The joining fee is not refunded — if you rejoin later, you'd pay it again.</p>`, 'Cancel membership', () => after(E.cancelClub(S)));
+      refresh();
+    },
     'chart-metric'(el) { ui.chartMetric = el.dataset.metric; refresh(); },
     'log-filter'(el) { ui.logFilter = el.dataset.filter; refresh(); },
     claim() { E.claimFreedom(S); ui.modal = null; save(); refresh(); },
@@ -1374,6 +1681,16 @@
 
   document.addEventListener('input', (e) => {
     const t = e.target;
+    if (t.id === 'opt-contracts') {
+      // Live-update the order ticket without re-rendering (so the Buy button keeps working).
+      const n = Math.max(0, Math.floor(Number(t.value) || 0));
+      ui.opt.contracts = n || 1;
+      const cost = Number(t.dataset.ask) * O.CONTRACT * n;
+      for (const id of ['opt-total', 'opt-maxloss', 'opt-buy-cost']) { const el = document.getElementById(id); if (el) el.textContent = money(cost); }
+      const mg = document.getElementById('opt-maxgain');
+      if (mg && t.dataset.putMax !== '') mg.textContent = money(Number(t.dataset.putMax) * O.CONTRACT * n);
+      return;
+    }
     if (t.classList.contains('pname')) { ui.setup.players[Number(t.dataset.i)].name = t.value; saveSetup(); }
     else if (t.dataset.setup) {
       ui.setup[t.dataset.setup] = t.type === 'checkbox' ? t.checked : t.value;
@@ -1384,7 +1701,26 @@
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (t.dataset.setup) { ui.setup[t.dataset.setup] = t.type === 'checkbox' ? t.checked : t.value; saveSetup(); }
+    if (t.classList.contains('ptype')) {
+      const i = Number(t.dataset.i), pl = ui.setup.players[i];
+      const bot = t.value || null;
+      if (!bot === !pl.bot) pl.bot = bot; // only the difficulty changed
+      else if (bot) {
+        if (setupHumans() <= 1) { toast('At least one person has to play.', 'bad'); return refresh(); }
+        if (/^Player \d+$/.test(pl.name.trim())) pl.name = freeBotName();
+        pl.bot = bot;
+      } else {
+        if (AI.BOT_NAMES.includes(pl.name) || /^Bot \d+$/.test(pl.name)) pl.name = `Player ${i + 1}`;
+        pl.bot = null;
+      }
+      saveSetup(); refresh();
+    }
     if (t.id === 'toggle-handoff' && S) { S.settings.handoff = t.checked; save(); }
+    if (t.dataset.opt) {
+      const k = t.dataset.opt;
+      if (k === 'sec') { ui.opt.sec = t.value; ui.opt.strike = 2; } else ui.opt[k] = Number(t.value);
+      refresh();
+    }
     if (t.id === 'import-file' && t.files && t.files[0]) {
       const reader = new FileReader();
       reader.onload = () => {
@@ -1406,7 +1742,8 @@
       return;
     }
     if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('qty')) {
-      const btn = e.target.parentElement.querySelector('[data-action="buy"], [data-action="pay-debt"], [data-action="pay-asset"], [data-action="borrow"]');
+      const btn = e.target.id === 'opt-contracts' ? document.getElementById('opt-buy')
+        : e.target.parentElement.querySelector('[data-action="buy"], [data-action="pay-debt"], [data-action="pay-asset"], [data-action="borrow"], [data-action="short-sell"], [data-action="cover"]');
       if (btn) btn.click();
     }
   });

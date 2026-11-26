@@ -316,6 +316,51 @@
     { sec: 'hlio', text: 'Rumor has it Helios Energy just struck an enormous natural-gas field.' }
   ];
 
+  // ---------------- Relationships (all fictional) ----------------
+  const PARTNER_NAMES = ['Alex', 'Jordan', 'Sam', 'Taylor', 'Casey', 'Riley', 'Morgan', 'Jamie', 'Avery', 'Quinn', 'Rowan', 'Skyler', 'Devon', 'Reese', 'Emerson', 'Parker', 'Hayden', 'Kai', 'Robin', 'Sage'];
+  const PARTNER_EMOJI = ['🌻', '🌙', '🎸', '📚', '🏄', '🎨', '🧗', '🍜', '🎭', '🌿'];
+  const MEET_STORIES = [
+    'You got talking with {name} at a friend\'s birthday party and lost track of time.',
+    'You matched with {name} on a dating app, and the messages have been great.',
+    '{name} sat next to you at a cooking class and ruined the risotto with you.',
+    'You keep running into {name} at the gym. Today they asked you out for coffee.',
+    'A coworker set you up with {name}, and the first conversation flowed easily.',
+    '{name} volunteers at the same food bank you do. They\'re funny and kind.'
+  ];
+  const BREAKUP_STORIES = [
+    'You and {name} have drifted apart. The spark just isn\'t there anymore.',
+    '{name} got a job offer across the country, and neither of you wants long distance.',
+    'You and {name} want different things out of life, and you agree to part as friends.',
+    'Constant arguments about money have worn you both down. You and {name} call it off.'
+  ];
+
+  // ---------------- Networking ----------------
+  const CONFERENCES = ['Regional Industry Summit', 'National Leadership Conference', 'Future of Work Expo', 'Professional Growth Retreat', 'Innovators\' Forum'];
+  const CLUBS = ['Downtown Professionals Club', 'Chamber of Commerce Leadership Circle', 'Executive Breakfast Society', 'Metro Business Network', 'Founders & Leaders Club'];
+
+  // ---------------- Homes to live in ----------------
+  const HOME_LISTINGS = {
+    starter: ['2BR Starter Condo', '2BR Townhouse near the Park', 'Cozy 2BR Bungalow', '1BR Loft Downtown'],
+    similar: ['3BR Ranch in a Quiet Cul-de-sac', '3BR/2BA Split-level', '3BR Craftsman near Good Schools', '3BR Colonial with a Garage'],
+    upgrade: ['4BR Colonial with a Big Yard', '4BR New Build with a Pool', '5BR Lake-view Home', 'Historic 4BR Victorian']
+  };
+
+  // Neighborhood news that moves the value of one home or rental property.
+  const NEIGHBORHOOD_NEWS = {
+    up: [
+      'A new light-rail station is opening a few blocks from {name}.',
+      'The school district near {name} was just ranked the best in the state.',
+      'A big tech employer is building an office near {name}, and buyers are flooding in.',
+      'A grocery store, cafés and a park are revitalizing the area around {name}.'
+    ],
+    down: [
+      'A factory near {name} closed, and several neighbors have listed their homes.',
+      'A new highway interchange is being built right behind {name}. It\'s noisy.',
+      'Updated flood maps put {name} in a higher-risk zone. Insurance quotes jumped.',
+      'A string of break-ins near {name} made the local news.'
+    ]
+  };
+
   const AVATARS = ['🦊', '🐼', '🐯', '🐸', '🦉', '🐙', '🦄', '🐢', '🐝', '🦁', '🐧', '🐨', '🦖', '🐳'];
   // Player identity colors: a validated categorical palette for dark surfaces, used in this fixed order
   // (colorblind-safe for neighboring slots). Every player also has an emoji and name, so color is never alone.
@@ -324,7 +369,8 @@
   MMS.Data = {
     JOBS, JOB_LEVELS, LIFESTYLES, EXPENSES, DEBT_TYPES, CAR_TYPES, CARD_NAMES,
     SECURITIES, PENNY_RELISTS, NEWS, LUXURIES, EMERGENCIES, SIDE_GIGS,
-    SELLER_STORIES, BIZ_STORIES, DEALS, STOCK_TIPS, AVATARS, COLORS
+    SELLER_STORIES, BIZ_STORIES, DEALS, STOCK_TIPS, AVATARS, COLORS,
+    PARTNER_NAMES, PARTNER_EMOJI, MEET_STORIES, BREAKUP_STORIES, CONFERENCES, CLUBS, HOME_LISTINGS, NEIGHBORHOOD_NEWS
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.Data;
 })(typeof window !== 'undefined' ? window : globalThis);

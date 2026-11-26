@@ -126,8 +126,17 @@
   }
 
   // ---------------------------------------------------------------- assets
+  /**
+   * Property values follow the regional housing market (reIndex) times the property's
+   * own neighborhood factor (localMult), which drifts randomly and jumps on local news.
+   */
   function propertyValue(state, prop) {
-    return prop.purchasePrice * prop.valueMult * state.market.reIndex / prop.reIndexAtPurchase;
+    return prop.purchasePrice * prop.valueMult * (prop.localMult || 1) * state.market.reIndex / prop.reIndexAtPurchase;
+  }
+
+  /** One month of neighborhood-level drift (~±4%/yr on top of the regional market). */
+  function driftLocal(obj, rng) {
+    obj.localMult = clamp((obj.localMult || 1) * Math.exp(0.011 * rng.normal() - 0.00006), 0.5, 2.5);
   }
 
   function propertyCashflow(prop) {
@@ -170,7 +179,29 @@
 
   /** Value of the player's own home (counts toward net worth, never toward passive income). */
   function homeValue(state, p) {
-    return p.home ? p.home.value * state.market.reIndex / p.home.reIndex : 0;
+    return p.home ? p.home.value * (p.home.localMult || 1) * state.market.reIndex / p.home.reIndex : 0;
+  }
+
+  /** The mortgage on the player's own home (a personal debt), if any. */
+  function homeMortgage(p) { return p.debts.find((d) => d.type === 'mortgage') || null; }
+
+  /** What selling your own home would bring: 6% selling costs, then the mortgage is repaid. */
+  function homeSale(state, p) {
+    const value = homeValue(state, p);
+    const fees = value * 0.06;
+    const m = homeMortgage(p);
+    const loan = m ? m.balance : 0;
+    return { value, fees, loan, net: value - fees - loan };
+  }
+
+  // ---------------------------------------------------------------- relationships & networking
+  const relStatus = (p) => (p.relationship ? p.relationship.status : 'single');
+  const isMarried = (p) => relStatus(p) === 'married';
+  /** Monthly networking strength: +1 for a recent conference, +1 for a club membership. */
+  function networkLevel(p) {
+    const n = p.network;
+    if (!n) return 0;
+    return (n.conferenceTurns > 0 ? 1 : 0) + (n.club ? 1 : 0);
   }
 
   // ---------------------------------------------------------------- income & expenses
@@ -187,8 +218,18 @@
     return t;
   }
 
+  /** The whole household's living costs (before a spouse's share). */
   function livingExpenses(p) { return sum(Object.values(p.expenses)); }
-  function childExpenses(p) { return p.children * p.childCost; }
+  /** A spouse pays half of the household's living costs, including the mortgage on the home you share. */
+  function partnerShare(p) {
+    if (!isMarried(p)) return 0;
+    const m = homeMortgage(p);
+    return Math.round((livingExpenses(p) + (m ? m.payment : 0)) * 0.5);
+  }
+  /** Children's costs; parents split them (childShare = 0.5 once you've had kids together). */
+  function childExpenses(p) { return Math.round(p.children * p.childCost * (p.childShare == null ? 1 : p.childShare)); }
+  function datingCost(p) { return relStatus(p) === 'dating' ? p.relationship.datingCost : 0; }
+  function clubDues(p) { return p.network && p.network.club ? p.network.club.dues : 0; }
   function debtPayments(p) { return sum(p.debts, (d) => d.payment); }
 
   function stocksValue(state, p) {
@@ -210,11 +251,16 @@
     const side = sum(p.businesses.filter((b) => b.kind === 'side'), businessCashflow);
     const interest = sum(p.notes, noteIncome);
     const collectibles = -sum(p.collectibles, (c) => c.upkeep || 0);
-    const passive = dividends + realEstate + business + side + interest + collectibles;
+    const O = MMS.Options;
+    const shortCarry = O ? -O.shortCarry(state, p) : 0;
+    const passive = dividends + realEstate + business + side + interest + collectibles + shortCarry;
     const living = livingExpenses(p);
+    const partner = partnerShare(p);
     const children = childExpenses(p);
+    const dating = datingCost(p);
+    const dues = clubDues(p);
     const debt = debtPayments(p);
-    const expenses = living + children + debt;
+    const expenses = living - partner + children + dating + dues + debt;
     const income = salary + gigs + passive;
     const cashflow = income - expenses;
     const target = expenses * state.settings.freedomMultiple;
@@ -228,15 +274,19 @@
     const collValue = sum(p.collectibles, (c) => c.value);
     const debtBalance = sum(p.debts, (d) => d.balance);
     const home = homeValue(state, p);
-    const assets = p.cash + sv + propValue + bizValue + notesValue + collValue + home;
-    const liabilities = debtBalance + propDebt + bizDebt;
+    const optionsValue = O ? sum(p.options || [], (o) => O.optionValue(state, o)) : 0;
+    const shortCollateral = O ? O.shortCollateral(p) : 0;
+    const shortLiability = O ? O.shortLiability(state, p) : 0;
+    const assets = p.cash + sv + propValue + bizValue + notesValue + collValue + home + optionsValue + shortCollateral;
+    const liabilities = debtBalance + propDebt + bizDebt + shortLiability;
 
     return {
-      salary, gigs, dividends, realEstate, business, side, interest, collectibles, passive,
-      living, children, debt, expenses, income, cashflow, target,
+      salary, gigs, dividends, realEstate, business, side, interest, collectibles, shortCarry, passive,
+      living, partner, children, dating, dues, debt, expenses, income, cashflow, target,
       progress: target > 0 ? Math.max(0, passive) / target : 0,
       free: passive > 0 && passive >= target,
       stocksValue: sv, propValue, propDebt, bizValue, bizDebt, notesValue, collValue, debtBalance, home,
+      optionsValue, shortCollateral, shortLiability,
       assets, liabilities, netWorth: assets - liabilities
     };
   }
@@ -253,6 +303,35 @@
   }
 
   // ---------------------------------------------------------------- player creation
+  function newRelationship() {
+    return { status: 'single', partner: null, since: 0, datingCost: 0, declined: 0, lastBabyAsk: -99, breakups: 0, marriages: 0, divorces: 0 };
+  }
+
+  function newStats() {
+    return {
+      turns: 0, donated: 0, deals: 0, good: 0, bad: 0, timesDownsized: 0, promotions: 0, raises: 0, interestPaid: 0,
+      passiveEarned: 0, realizedGains: 0, luxurySpent: 0, weddingSpent: 0, datingSpent: 0, networkingSpent: 0, optionTrades: 0
+    };
+  }
+
+  /** Fill in fields added after a save was made, so older save files keep working. */
+  function migratePlayer(p) {
+    if (!p.relationship) p.relationship = newRelationship();
+    if (!p.network) p.network = { club: null, conferenceTurns: 0, conferences: 0 };
+    if (!Array.isArray(p.options)) p.options = [];
+    if (!p.shorts) p.shorts = {};
+    if (p.childShare == null) p.childShare = 1;
+    if (p.bot === undefined) p.bot = null;
+    p.stats = Object.assign(newStats(), p.stats);
+    if (p.home) {
+      if (p.home.localMult == null) p.home.localMult = 1;
+      if (p.home.purchasePrice == null) p.home.purchasePrice = p.home.value;
+      if (p.home.boughtRound == null) p.home.boughtRound = 0;
+      if (!p.home.name) p.home.name = 'Your home';
+    }
+    for (const pr of p.properties) if (pr.localMult == null) pr.localMult = 1;
+  }
+
   function createPlayer(state, rng, cfg, job) {
     const Dt = D();
     const salary = roundTo(rng.range(job.salary), 50);
@@ -273,9 +352,14 @@
       ownsHome: false,
       children: 0,
       childCost: roundTo(clamp(salary * rng.float(0.07, 0.1), 300, 1400), 10),
+      childShare: 1,
+      relationship: newRelationship(),
+      network: { club: null, conferenceTurns: 0, conferences: 0 },
       cash: 0,
       debts: [],
       holdings: {},
+      options: [],
+      shorts: {},
       properties: [],
       businesses: [],
       notes: [],
@@ -286,7 +370,7 @@
       retired: false,
       finished: false,
       place: null,
-      stats: { turns: 0, donated: 0, deals: 0, good: 0, bad: 0, timesDownsized: 0, promotions: 0, interestPaid: 0, passiveEarned: 0, realizedGains: 0, luxurySpent: 0 },
+      stats: newStats(),
       history: []
     };
 
@@ -304,7 +388,8 @@
       const pay = rentEquivalent * rng.float(0.8, 1.1);
       const loan = addDebt(state, p, { type: 'mortgage', name: 'Home mortgage', balance: principalFromPayment(pay, apr, term), apr, termMonths: term });
       // The home itself is worth more than the mortgage (some equity) and tracks the housing market.
-      p.home = { value: roundTo(loan.balance * rng.float(1.15, 1.6), 1000), reIndex: state.market.reIndex };
+      const value = roundTo(loan.balance * rng.float(1.15, 1.6), 1000);
+      p.home = { name: 'Your home', value, reIndex: state.market.reIndex, localMult: 1, boughtRound: 0, purchasePrice: value };
     }
 
     // Starting debts of various kinds.
@@ -337,7 +422,7 @@
       addDebt(state, p, { type: 'boat', name: 'Boat loan', balance: principalFromPayment(salary * rng.float(0.03, 0.06), apr, term), apr, termMonths: term });
     }
 
-    if (rng.chance(0.3)) p.children = rng.int(1, 2);
+    // Everyone starts single with no children; relationships and kids come through life events.
 
     // Keep the starting cashflow healthy: 10%–38% of salary.
     const cf = () => salary - livingExpenses(p) - childExpenses(p) - debtPayments(p);
@@ -372,7 +457,8 @@
   }
 
   // ---------------------------------------------------------------- payday
-  function resolveStartup(state, p, b, rng, notes) {
+  /** A startup reaches its outcome. Returns the payout; the result is announced with a pop-up. */
+  function resolveStartup(state, p, b, rng, popups) {
     const lucky = p.karmaTurns > 0;
     const outcomes = [
       { id: 'fail', w: lucky ? 0.45 : 0.55, mult: [0, 0] },
@@ -382,16 +468,24 @@
     ];
     const o = rng.weighted(outcomes, (x) => x.w);
     const payout = roundTo(b.invested * rng.range(o.mult), 100);
-    p.cash += payout;
     p.businesses = p.businesses.filter((x) => x !== b);
-    const msg = {
-      fail: `💀 ${b.name} ran out of money and shut down. Your ${money(b.invested)} investment is gone.`,
-      meh: `😐 ${b.name} was acquired for a modest price. You got back ${money(payout)} on your ${money(b.invested)} investment.`,
-      good: `🎉 ${b.name} was acquired! Your ${money(b.invested)} stake paid out ${money(payout)}.`,
-      huge: `🦄 ${b.name} became a unicorn! Your ${money(b.invested)} stake is now worth ${money(payout)} — cashed out!`
+    const gain = payout - b.invested;
+    p.stats.realizedGains += gain;
+    const pop = {
+      fail: { icon: '💀', title: `${b.name} failed`, text: `${b.name} ran out of money and shut down. Your ${money(b.invested)} investment is gone.` },
+      meh: { icon: '😐', title: `${b.name} was acquired (barely)`, text: `${b.name} was bought for a modest price. You got back ${money(payout)} on your ${money(b.invested)} investment — ${gain >= 0 ? 'a small gain' : 'a loss'} of ${money(Math.abs(gain))}.` },
+      good: { icon: '🎉', title: `${b.name} succeeded!`, text: `${b.name} was acquired! Your ${money(b.invested)} stake paid out ${money(payout)} — about ${(payout / b.invested).toFixed(1)}× your money.` },
+      huge: { icon: '🦄', title: `${b.name} became a unicorn!`, text: `${b.name} is now worth over a billion dollars. Your ${money(b.invested)} stake cashed out for ${money(payout)} — ${(payout / b.invested).toFixed(0)}× your money!` }
     }[o.id];
-    notes.push(msg);
-    log(state, `${p.name}: ${msg}`, o.id === 'fail' ? 'bad' : o.id === 'meh' ? 'neutral' : 'good', p.id);
+    const tone = o.id === 'fail' ? 'bad' : o.id === 'meh' ? (gain >= 0 ? 'neutral' : 'bad') : 'good';
+    popups.push(Object.assign(pop, {
+      tone,
+      lesson: o.id === 'fail' || o.id === 'meh'
+        ? 'More than half of startups fail. Angel investors expect most bets to lose and hope one big winner pays for all of them — so never put in more than you can afford to lose.'
+        : 'This is the startup "power law": a few huge winners make up for many losers. The cash is a one-time windfall — investing it in income-producing assets turns it into passive income.'
+    }));
+    log(state, `${p.name}: ${pop.text}`, tone, p.id);
+    return payout;
   }
 
   /** Reveal a ramping business' real monthly profit once it opens. */
@@ -408,18 +502,18 @@
     b.performance = 1;
   }
 
-  function closeBusiness(state, p, b, rng, notes) {
+  function closeBusiness(state, p, b, rng, popups) {
     const salvage = roundTo(b.invested * rng.float(0.05, 0.2), 100);
     const loanBal = b.loan ? b.loan.balance : 0;
     p.businesses = p.businesses.filter((x) => x !== b);
-    let msg = `😞 ${b.name} went out of business. You salvaged ${money(salvage)} from the equipment.`;
+    let msg = `${b.name} went out of business. You salvaged ${money(salvage)} from the equipment.`;
     if (salvage >= loanBal) {
       p.cash += salvage - loanBal;
     } else {
       addDebt(state, p, { type: 'business', name: `Leftover loan (${b.name})`, balance: loanBal - salvage, apr: b.loan.apr, termMonths: 60 });
       msg += ` ${money(loanBal - salvage)} of its loan is still owed.`;
     }
-    notes.push(msg);
+    popups.push({ icon: '😞', tone: 'bad', title: `${b.name} closed`, text: msg, lesson: 'About one in five small businesses fail in their first year. Risky businesses should be a small slice of your portfolio — and any loan you signed for is still yours to repay.' });
     log(state, `${p.name}: ${msg}`, 'bad', p.id);
   }
 
@@ -431,6 +525,7 @@
     const before = p.cash;
     const lines = [];
     const notes = [];
+    const popups = []; // big moments (startup exits, closures, option expiries) shown as pop-up cards
     const add = (label, amount) => { if (amount !== 0 || label.startsWith('Salary')) lines.push({ label, amount: cents(amount) }); p.cash += amount; };
 
     // Earned income
@@ -482,14 +577,16 @@
         notes.push(`🏠 The mortgage on ${prop.name} is paid off!`);
       }
       re += rent - opex - mpay;
+      driftLocal(prop, rng);
     }
     add('Real estate (net)', re);
+    if (p.home) driftLocal(p.home, rng);
 
-    let biz = 0, side = 0;
+    let biz = 0, side = 0, exits = 0;
     for (const b of p.businesses.slice()) {
       if (b.kind === 'startup') {
         b.monthsLeft--;
-        if (b.monthsLeft <= 0) resolveStartup(state, p, b, rng, notes);
+        if (b.monthsLeft <= 0) exits += resolveStartup(state, p, b, rng, popups);
         continue;
       }
       let profit;
@@ -507,7 +604,7 @@
         if (b.fail && (b.base <= 0 || b.performance < 0.55) && rng.chance(b.base <= 0 ? 0.15 : 0.2)) {
           const loanPay = b.loan ? amortizeLoan(b.loan) : 0;
           biz += profit - loanPay;
-          closeBusiness(state, p, b, rng, notes);
+          closeBusiness(state, p, b, rng, popups);
           continue;
         }
       }
@@ -520,6 +617,7 @@
     }
     add('Businesses (net)', biz);
     add('Side projects', side);
+    add('Startup exits', exits);
 
     let interest = 0;
     for (const n of p.notes.slice()) {
@@ -551,9 +649,26 @@
       .filter((l) => /^(Dividends|Real estate|Businesses|Side projects|Interest|Collectible)/.test(l.label))
       .reduce((a, l) => a + l.amount, 0);
 
+    // Options & short positions
+    if (MMS.Options) {
+      const cashBefore = p.cash;
+      const st = MMS.Options.settle(state, p, notes);
+      const marginCash = cents(p.cash - cashBefore); // forced buy-backs settle straight from collateral
+      if (marginCash) lines.push({ label: 'Margin call (forced buy-back)', amount: marginCash });
+      add('Options expiring', st.optionCash);
+      add('Short positions (fees & dividends)', -st.carry);
+      popups.push(...st.popups);
+    }
+
     // Expenses
     add('Living expenses', -livingExpenses(p));
-    if (p.children > 0) add(`Children (${p.children})`, -childExpenses(p));
+    const share = partnerShare(p);
+    if (share) add(`${p.relationship.partner.name} pays half the household bills`, share);
+    if (p.children > 0) add(`Children (${p.children})${p.childShare < 1 ? ' — your half' : ''}`, -childExpenses(p));
+    const dating = datingCost(p);
+    if (dating) { add(`Dating ${p.relationship.partner.name}`, -dating); p.stats.datingSpent += dating; }
+    const dues = clubDues(p);
+    if (dues) { add(`${p.network.club.name} dues`, -dues); p.stats.networkingSpent += dues; }
     add('Debt payments', -processDebts(state, p, notes));
 
     p.cash = cents(p.cash);
@@ -564,7 +679,7 @@
       notes.push(`⚠️ You couldn't cover your bills, so ${money(short)} went on your credit card.`);
       log(state, `${p.name} had to put ${money(short)} of bills on a credit card.`, 'bad', p.id);
     }
-    return { lines, notes, net: cents(p.cash - before), before, after: p.cash };
+    return { lines, notes, popups, net: cents(p.cash - before), before, after: p.cash };
   }
 
   function snapshot(state, p) {
@@ -578,8 +693,9 @@
     currentPlayer, getPlayer, jobTitle, lifestyleOf, isEmployed,
     revolvingPayment, addDebt, chargeCredit, processDebts,
     propertyValue, propertyCashflow, propertySale, businessProfit, businessCashflow, businessValue, businessSale, noteIncome, homeValue,
-    salaryIncome, gigIncome, dividendIncome, livingExpenses, childExpenses, debtPayments, stocksValue, summarize,
-    bankRate, loanLimit, createPlayer, payday, snapshot, revealBusiness
+    homeMortgage, homeSale, relStatus, isMarried, networkLevel,
+    salaryIncome, gigIncome, dividendIncome, livingExpenses, partnerShare, childExpenses, datingCost, clubDues, debtPayments, stocksValue, summarize,
+    bankRate, loanLimit, createPlayer, migratePlayer, newRelationship, payday, snapshot, revealBusiness
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.Core;
 })(typeof window !== 'undefined' ? window : globalThis);

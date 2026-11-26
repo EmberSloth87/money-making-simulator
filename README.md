@@ -1,7 +1,8 @@
 # 💰 Money Making Simulator
 
 A turn-based board-game-style simulation about **building passive income and reaching financial freedom**.
-1–8 players share one device and take turns (pass-and-play). Everyone starts with a random job, lifestyle,
+1–8 players share one device and take turns (pass-and-play), and any seat can be a computer opponent, so you can
+also play alone against bots. Everyone starts with a random job, lifestyle,
 savings and pile of debts — the first player whose **passive income reaches 2× their monthly expenses**
 quits their job and wins.
 
@@ -25,7 +26,8 @@ Other commands:
 
 ```bash
 npm test           # engine + market tests (Node's built-in test runner)
-npm run simulate   # play 200 bot games and report how long freedom takes: npm run simulate -- 300 4
+npm run simulate   # play 200 bot games and report how long freedom takes
+                   # npm run simulate -- [games] [players] [easy|normal|hard|mix], e.g. npm run simulate -- 300 3 mix
 ```
 
 ## How to play
@@ -37,11 +39,28 @@ Each turn:
 2. **Pop-ups** — random events appear, but not every turn:
    - **Deals** (about half of turns): real estate, businesses, startups, side projects, lending notes, collectibles and stock tips.
    - **Luxury temptations** and **emergencies** — pay cash or put them on a credit card.
-   - **Downsizing** — no paycheck for 1–6 turns. **Promotions**, raises, bonuses, side gigs, new babies, lifestyle creep and more.
+   - **Downsizing** — no paycheck for 1–6 turns (networking shortens it). **Promotions**, smaller permanent **raises**, bonuses, side gigs, lifestyle creep and more.
+   - **Networking** — a one-time conference fee or a monthly club subscription makes raises, promotions and side gigs more likely and shortens job searches.
+   - **Relationships** — meet someone and date, get married (pay cash for the wedding, finance it, or keep it simple), have children, break up or divorce.
+   - **Startup results** — a pop-up tells you when a startup you backed succeeds or fails.
    - **Charity** — donate 10% of your monthly income for 3 turns of good karma (better deals, more good luck, fewer layoffs).
    - **Buyer offers** for your properties and businesses, repairs, vacancies and expansion opportunities.
-3. **Act** — buy deals, trade stocks, pay down debt, borrow from the bank, sell assets or downshift your lifestyle.
+3. **Act** — buy deals, trade stocks, options and short positions, pay down debt, borrow from the bank, sell assets,
+   buy or sell the home you live in, or downshift your lifestyle.
 4. **End your turn** and pass the device. When everyone has played, the month ends and the market moves.
+
+**Computer opponents:** on the setup screen, switch any seat from *Person* to a bot, or press
+*Add a computer opponent*. Bots play by exactly the same rules and get their own random cards; their turns
+are instant, and your payday screen shows what each one did since your last turn.
+
+| Level | Personality | How it plays |
+|---|---|---|
+| Easy | The Spender | Thin savings, luxuries on the credit card, chases hot tips and panic-sells, finances a big wedding, rarely buys deals. |
+| Normal | The Steady Saver | Buys deals with solid cashflow, pays off debt above 10% APR, keeps extra cash in an index fund. |
+| Hard | The Investor | Pays off debt above 7% APR, sells stocks or borrows to fund strong deals, trims a pricey lifestyle, invests spare cash in dividend stocks. |
+
+In all-bot test games, Hard wins about two-thirds of three-way races against Normal and Easy. If every person
+has finished, you can let the bots race for the remaining places or end the game.
 
 **Winning:** passive income (dividends + rental cashflow + business profit + interest) ≥ 2× total monthly
 expenses (living + children + debt payments). Paying off debt lowers your expenses *and* your target.
@@ -61,6 +80,14 @@ players by progress, and the freedom goal can be set to 1.5× or 3× for shorter
 - **26 jobs** (barista to doctor), 4 lifestyles, and starting debts across credit cards, auto, student,
   mortgage, personal, medical, buy-now-pay-later and boat loans.
 - **A bank** that lends as long as the payment fits your cashflow.
+- **Options & short selling**: calls, puts and straddles (1-, 3- and 6-month expiries, 100 shares per contract) priced with
+  Black–Scholes from each stock's live volatility, with a bid/ask spread and a payoff chart; short sales with a 50% margin deposit,
+  monthly borrow fees and dividends owed, and automatic margin calls.
+- **Your home**: every home and rental has its own neighborhood value on top of the regional housing market, plus local news
+  that moves it. Sell your home and rent, or buy from three listings each turn (5–20% down, 3% closing costs, 43% debt-to-income limit).
+- **Relationships**: everyone starts single. Dating costs money each month; a spouse splits household bills (a couple's household
+  costs about 1.5× a single person's), children's costs are shared, and divorce costs legal fees plus half your cash and stocks.
+- **Networking**: conferences (one-time, ~12 months of benefit) and clubs (joining fee + monthly dues, cancel any time).
 
 ## The learning side
 
@@ -70,7 +97,7 @@ players by progress, and the freedom goal can be set to 1.5× or 3× for shorter
 - **Debt tab**: interest charged this month, months to payoff, interest left to pay, avalanche vs. snowball,
   and how extra payments shorten a loan.
 - **Money coach**: tips based on *your* numbers (expensive debt, emergency fund, concentration risk, idle cash…).
-- **Learn tab**: 17 core ideas (compound growth, leverage, volatility, diversification, bonds and rates…)
+- **Learn tab**: 22 core ideas (compound growth, leverage, volatility, diversification, bonds and rates…)
   with your own numbers plugged in.
 - **End-of-game report card**: interest paid, luxury spending, donations, passive income earned.
 
@@ -103,9 +130,11 @@ js/rng.js           seeded random numbers (same seed → same game)
 js/data.js          jobs, lifestyles, securities, news, events and deal templates
 js/core.js          finance math, player generation, income/expenses, payday
 js/market.js        stock market, economy cycle, interest rates, statistics
-js/deals.js         deal generation, buying/selling, deal analysis
-js/events.js        random events, charity, offers, lessons
-js/engine.js        game setup, turn flow, player actions, money coach, save/load
+js/options.js       options pricing (Black–Scholes), option & short positions, settlement, margin calls
+js/deals.js         deal generation, buying/selling, deal analysis, buying/selling your own home
+js/events.js        random events, raises, networking, relationships, charity, offers, lessons
+js/ai.js            computer opponents (easy / normal / hard)
+js/engine.js        game setup, turn flow, bot turns, player actions, money coach, save/load
 js/ui.js            rendering and input
 server.js           optional zero-dependency local web server
 tests/              node --test suite

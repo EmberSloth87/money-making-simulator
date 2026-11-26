@@ -7,17 +7,18 @@
   'use strict';
   if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
     require('./rng.js'); require('./data.js'); require('./core.js');
-    require('./market.js'); require('./deals.js'); require('./events.js');
+    require('./market.js'); require('./options.js'); require('./deals.js'); require('./events.js'); require('./ai.js');
   }
   const MMS = global.MMS || (global.MMS = {});
   const C = MMS.Core, D = MMS.Data, RNG = MMS.RNG;
 
-  const SAVE_VERSION = 1;
+  const SAVE_VERSION = 2;
   const fail = (msg) => ({ ok: false, msg });
 
   // ------------------------------------------------------------------ setup
   /**
-   * config: { players: [{ name, emoji, color }], seed?, timeLimit?, handoff?, freedomMultiple? }
+   * config: { players: [{ name, emoji, color, bot? }], seed?, timeLimit?, handoff?, freedomMultiple? }
+   * bot: 'easy' | 'normal' | 'hard' makes that player a computer opponent.
    */
   function createGame(config) {
     const players = (config.players || []).filter(Boolean);
@@ -55,6 +56,7 @@
         emoji: cfg.emoji || D.AVATARS[i % D.AVATARS.length],
         color: cfg.color || D.COLORS[i % D.COLORS.length]
       }, jobs[i % jobs.length]);
+      p.bot = cfg.bot ? MMS.AI.makeBot(cfg.bot, `${seed}:${i}`) : null;
       state.players.push(p);
     });
     state.round = 0;
@@ -97,7 +99,8 @@
     const p = current(state);
     const rng = RNG.makeRng(state);
     const payday = C.payday(state, p, rng);
-    state.turn = { round: state.round, playerId: p.id, payday, cards: [] };
+    state.turn = { round: state.round, playerId: p.id, payday, cards: [], homes: MMS.Deals.homeListings(state, p, rng) };
+    for (const pu of payday.popups) state.turn.cards.push(MMS.Events.popup(state, p, pu));
     MMS.Events.generate(state, p, rng);
     state.phase = 'turn';
     checkFreedom(state);
@@ -131,7 +134,7 @@
   function canEndTurn(state) {
     if (state.phase !== 'turn') return fail('No turn in progress.');
     const open = state.turn.cards.find((c) => c.required && !c.resolved);
-    if (open) return fail(`First decide how to pay for "${open.title}".`);
+    if (open) return fail(open.type === 'expense' ? `First decide how to pay for "${open.title}".` : `First make a decision on "${open.title}".`);
     return { ok: true };
   }
 
@@ -175,6 +178,7 @@
     }
     p.stats.turns++;
     state.lastPlayerId = p.id;
+    if (!p.bot) state.lastHumanId = p.id;
     p.history.push(C.snapshot(state, p));
     if (p.history.length > 400) p.history.shift();
     state.pendingWin = null;
@@ -228,6 +232,67 @@
       return (b.s.progress - a.s.progress) || (b.s.netWorth - a.s.netWorth);
     });
     return rows;
+  }
+
+  // ------------------------------------------------------------------ computer opponents
+  const isBot = (p) => !!(p && p.bot);
+  const humans = (state) => state.players.filter((p) => !p.bot);
+  const activeHumans = (state) => activePlayers(state).filter((p) => !p.bot);
+
+  /** Play one whole turn for the current player, who must be a bot. Returns a recap of what it did. */
+  function playBotTurn(state) {
+    const p = current(state);
+    if (!isBot(p)) return fail('It is not a computer player\'s turn.');
+    if (state.phase === 'handoff') { const r = beginTurn(state); if (!r.ok) return r; }
+    if (state.phase !== 'turn') return fail('No turn in progress.');
+    const pd = state.turn.payday;
+    const did = MMS.AI.playTurn(state);
+    const events = [];
+    for (const c of state.turn.cards) {
+      if (c.type === 'tip' || (c.kind === 'deal' && !c.resolved) || c.outcome === 'Passed' || (c.kind === 'deal' && c.outcome === 'Bought ✔')) continue;
+      if (c.type === 'info') events.push({ text: `${c.icon || ''} ${c.title}`.trim(), tone: c.tone });
+      else if (c.resolved && c.outcome && !/^(Declined|Not right now|Ignored)$/.test(c.outcome)) events.push({ text: `${c.icon || ''} ${c.title}: ${c.outcome}`.trim(), tone: c.tone === 'deal' ? 'neutral' : c.tone });
+    }
+    const recap = { playerId: p.id, round: state.round, net: pd.net, items: events.concat(did), won: false };
+    if (state.pendingWin === p.id) {
+      claimFreedom(state);
+      recap.won = true;
+      return { ok: true, recap };
+    }
+    const r = endTurn(state, { force: true });
+    if (!r.ok) return r;
+    const s = C.summarize(state, p);
+    recap.progress = s.progress;
+    recap.netWorth = s.netWorth;
+    return { ok: true, recap };
+  }
+
+  /**
+   * Play bot turns until it's a person's turn, someone wins, or the game ends.
+   * maxTurns guards against an endless all-bot race.
+   */
+  function runBots(state, maxTurns) {
+    maxTurns = maxTurns || 5000;
+    const recaps = [];
+    let n = 0;
+    while (state.phase === 'handoff' && isBot(current(state)) && n < maxTurns) {
+      const r = playBotTurn(state);
+      if (!r.ok) break;
+      recaps.push(r.recap);
+      n++;
+    }
+    return { ok: true, recaps, stalled: n >= maxTurns };
+  }
+
+  /** End the game now (e.g. once every person has finished and only bots are left). */
+  function finishGame(state) {
+    if (state.phase === 'gameover') return fail('The game is already over.');
+    state.phase = 'gameover';
+    state.turn = null;
+    state.pendingWin = null;
+    state.endReason = state.endReason || (state.winners.length ? 'freedom' : 'ended');
+    C.log(state, '🏁 The game was ended.', 'neutral');
+    return { ok: true };
   }
 
   // ------------------------------------------------------------------ stock market
@@ -377,6 +442,56 @@
     return fail('Unknown asset.');
   }
 
+  // ------------------------------------------------------------------ options & short selling
+  function buyOption(state, secId, kind, strike, months, contracts) {
+    const bad = requireTurn(state); if (bad) return bad;
+    return done(state, MMS.Options.buyOption(state, current(state), secId, kind, strike, months, contracts));
+  }
+
+  function sellOption(state, optionId) {
+    const bad = requireTurn(state); if (bad) return bad;
+    return done(state, MMS.Options.sellOption(state, current(state), optionId));
+  }
+
+  function shortSell(state, secId, shares) {
+    const bad = requireTurn(state); if (bad) return bad;
+    return done(state, MMS.Options.shortSell(state, current(state), secId, shares));
+  }
+
+  function coverShort(state, secId, shares) {
+    const bad = requireTurn(state); if (bad) return bad;
+    return done(state, MMS.Options.coverShort(state, current(state), secId, shares));
+  }
+
+  // ------------------------------------------------------------------ housing
+  /** Sell the home you live in and move into a rental ('similar' or 'smaller'). */
+  function sellHome(state, rent) {
+    const bad = requireTurn(state); if (bad) return bad;
+    if (rent !== 'similar' && rent !== 'smaller') return fail('Choose where you will live next.');
+    return done(state, MMS.Deals.sellHome(state, current(state), { rent }));
+  }
+
+  /** Buy one of this turn's home listings (selling your current home first, if you own one). */
+  function buyHome(state, listingId, downPct) {
+    const bad = requireTurn(state); if (bad) return bad;
+    const listing = (state.turn.homes || []).find((h) => h.id === listingId);
+    if (!listing) return fail('That home is no longer for sale.');
+    const r = MMS.Deals.buyHome(state, current(state), listing, Number(downPct));
+    if (r.ok) state.turn.homes = state.turn.homes.filter((h) => h !== listing);
+    return done(state, r);
+  }
+
+  // ------------------------------------------------------------------ networking
+  function cancelClub(state) {
+    const bad = requireTurn(state); if (bad) return bad;
+    const p = current(state);
+    const club = p.network.club;
+    if (!club) return fail('You are not in a networking club.');
+    p.network.club = null;
+    C.log(state, `${p.name} cancelled their ${club.name} membership.`, 'neutral', p.id);
+    return done(state, { ok: true, msg: `Cancelled your ${club.name} membership. Your expenses drop by ${C.money(club.dues)}/mo (and your freedom target by ${C.money(club.dues * state.settings.freedomMultiple)}/mo), but you lose its networking boost.` });
+  }
+
   // ------------------------------------------------------------------ lifestyle
   const DOWNSHIFT_COOLDOWN = 6;
   const DOWNSHIFT_FACTOR = 0.85;
@@ -453,6 +568,13 @@
     if (p.lifestyle >= 2 && s.progress < 0.4) {
       add(3, '🏡', 'A more modest lifestyle lowers your expenses AND your freedom target. Check "Downshift lifestyle" in the Debt & Budget tab.');
     }
+    const spec = s.optionsValue + Math.max(0, s.shortLiability);
+    if (spec > 2000 && spec > 0.25 * Math.max(1, s.assets - s.home)) {
+      add(6, '🎯', `Options and short positions are ${Math.round(spec / Math.max(1, s.assets - s.home) * 100)}% of your investments. They are leveraged bets: options can expire worthless and shorts can lose more than you put in. Keep them a small slice.`);
+    }
+    if (p.network.club && !C.isEmployed(p)) {
+      add(7, '🥂', `You're paying ${C.money(p.network.club.dues)}/mo in club dues without a job. The contacts will shorten your search, but if cash is tight, cancelling the membership saves money right away.`);
+    }
     if (s.passive <= 0 && state.round > 3) {
       add(6, '🌱', 'You have no passive income yet. Even a small rental, a vending route or dividend stocks gets the snowball rolling.');
     }
@@ -465,15 +587,25 @@
 
   function deserialize(json) {
     const s = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!s || s.version !== SAVE_VERSION || !Array.isArray(s.players) || !s.players.length || !s.market || !s.market.securities) {
+    if (!s || !(s.version >= 1 && s.version <= SAVE_VERSION) || !Array.isArray(s.players) || !s.players.length || !s.market || !s.market.securities) {
       throw new Error('This does not look like a Money Making Simulator save file.');
     }
+    // Older saves: fill in everything added since (relationships, networking, options, home values).
+    for (const p of s.players) C.migratePlayer(p);
+    if (s.turn && !s.turn.homes) {
+      const p = C.getPlayer(s, s.turn.playerId);
+      s.turn.homes = p ? MMS.Deals.homeListings(s, p, RNG.makeRng(s)) : [];
+    }
+    if (s.turn && s.turn.payday && !s.turn.payday.popups) s.turn.payday.popups = [];
+    s.version = SAVE_VERSION;
     return s;
   }
 
   MMS.Engine = {
     createGame, beginTurn, resolveCard, markSeen, canEndTurn, endTurn, claimFreedom, continueGame,
+    isBot, humans, activeHumans, playBotTurn, runBots, finishGame,
     buyStock, sellStock, payDebt, payAssetLoan, borrow, sellAsset, downshift, downshiftInfo,
+    buyOption, sellOption, shortSell, coverShort, sellHome, buyHome, cancelClub,
     coachTips, standings, activePlayers, checkFreedom, serialize, deserialize, interestLeft
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS;

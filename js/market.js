@@ -307,6 +307,7 @@
           const h = p.holdings[id];
           if (h) h.shares *= k;
         }
+        if (MMS.Options) MMS.Options.applySplit(state, id, k);
         headlines.push({ text: `✂️ ${s.name} (${s.ticker}) does a 10-for-1 split.`, tone: 'neutral', lesson: 'A split changes nothing about what you own: 10× the shares at 1/10th the price. It just makes shares cheaper to buy.' });
       }
     }
@@ -320,6 +321,7 @@
         if (h && h.shares > 0) log(state, `${p.name} lost ${h.shares.toLocaleString('en-US')} shares of ${pn.ticker} in the bankruptcy.`, 'bad', p.id);
         delete p.holdings.penny;
       }
+      if (MMS.Options) MMS.Options.applyBankruptcy(state, 'penny');
       const relist = D().PENNY_RELISTS[m.pennyGeneration % D().PENNY_RELISTS.length];
       m.pennyGeneration++;
       const price = cents(rng.float(1.5, 4));

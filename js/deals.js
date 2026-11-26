@@ -170,7 +170,7 @@
       case 'realestate':
         p.properties.push({
           id, name: deal.title, icon: deal.icon, template: deal.template, units: deal.units,
-          purchasePrice: deal.price, cost: deal.cash, reIndexAtPurchase: state.market.reIndex, valueMult: 1,
+          purchasePrice: deal.price, cost: deal.cash, reIndexAtPurchase: state.market.reIndex, valueMult: 1, localMult: 1,
           rent: deal.rent, opex: deal.opex, str: !!deal.str, land: !!deal.land,
           mortgage: deal.loan > 0 ? { balance: deal.loan, apr: deal.rate, payment: deal.payment } : null,
           rehabLeft: deal.fixer ? deal.fixer.turns : 0, arvMult: deal.fixer ? deal.fixer.arvMult : 1,
@@ -259,6 +259,113 @@
     return { ok: true, msg: `Sold your ${note.name} to another investor for ${c.money(net)} (a 5% discount for selling early).` };
   }
 
+  // ------------------------------------------------------------------ the home you live in
+  const DOWN_OPTIONS = [0.05, 0.1, 0.2];
+  const DOWN_RATE_BUMP = { 0.05: 0.375, 0.1: 0.125, 0.2: 0 }; // smaller down payment → riskier loan → higher rate
+  const BUY_CLOSING = 0.03;
+  const SELL_COSTS = 0.06;
+  const MAX_DTI = 0.43;
+
+  /** Typical monthly rent for a home worth `value` (a price-to-rent ratio of about 18.5). */
+  function rentFor(value) { return C().roundTo(value * 0.0045, 5); }
+
+  /** Monthly income lenders count: salary, side gigs and positive passive income. */
+  function qualifyingIncome(state, p) {
+    const s = C().summarize(state, p);
+    return s.salary + s.gigs + Math.max(0, s.passive);
+  }
+
+  /** Three homes for sale this turn — a starter, a similar and an upgrade — sized to the player's pay. */
+  function homeListings(state, p, rng) {
+    const { roundTo, amortPayment, nextId } = C();
+    const rate = MMS.Market.baseMortgageRate(state);
+    const income = Math.max(p.job.salary, p.job.startSalary);
+    const perDollar = 0.9 * amortPayment(1, rate, 360) + 0.0013;   // monthly cost of $1 of home, 10% down
+    const base = income * 0.28 / perDollar * state.market.reIndex / 100; // the "28% of income" guideline
+    const tiers = [['starter', 0.65], ['similar', 1], ['upgrade', 1.5]];
+    return tiers.map(([tier, mult]) => {
+      const price = roundTo(base * mult * rng.float(0.88, 1.12), 1000);
+      return {
+        id: nextId(state, 'h'), tier, name: rng.pick(D().HOME_LISTINGS[tier]), price, rate,
+        ownerCosts: roundTo(price * rng.float(0.0011, 0.0016), 5)
+      };
+    });
+  }
+
+  /** Everything about buying `listing` with `downPct` down (and selling the current home first, if any). */
+  function homePurchaseTerms(state, p, listing, downPct) {
+    const { roundTo, amortPayment, homeSale, homeMortgage, debtPayments } = C();
+    const rate = listing.rate + (DOWN_RATE_BUMP[downPct] || 0);
+    const down = roundTo(listing.price * downPct, 100);
+    const closing = roundTo(listing.price * BUY_CLOSING, 100);
+    const loan = listing.price - down;
+    const payment = Math.round(amortPayment(loan, rate, 360));
+    const sale = p.home ? homeSale(state, p) : null;
+    const oldMortgage = homeMortgage(p);
+    const available = p.cash + (sale ? sale.net : 0);
+    const income = qualifyingIncome(state, p);
+    // Buying always sells the current home first, so its mortgage drops out. A spouse pays half the new one.
+    const share = C().isMarried(p) ? 0.5 : 1;
+    const otherDebt = debtPayments(p) - (oldMortgage ? oldMortgage.payment : 0);
+    const newDebt = otherDebt + payment * share;
+    const dti = income > 0 ? newDebt / income : Infinity;
+    let reason = null;
+    if (!DOWN_OPTIONS.includes(downPct)) reason = 'Choose a 5%, 10% or 20% down payment.';
+    else if (available < down + closing) reason = `You need ${C().money(down + closing)} for the down payment and closing costs${sale ? ' (counting what your current home would sell for)' : ''}, but have ${C().money(available)}.`;
+    else if (dti > MAX_DTI) reason = `The bank says no: all your debt payments would be ${Math.round(dti * 100)}% of your income. Lenders usually cap that at ${Math.round(MAX_DTI * 100)}%.`;
+    return { rate, down, closing, loan, payment, sale, available, dti, reason, monthly: payment + listing.ownerCosts };
+  }
+
+  function buyHome(state, p, listing, downPct) {
+    const c = C();
+    const t = homePurchaseTerms(state, p, listing, downPct);
+    if (t.reason) return { ok: false, msg: t.reason };
+    let soldMsg = '';
+    if (p.home) {
+      const r = sellHome(state, p, { rent: 'none' });
+      if (!r.ok) return r;
+      soldMsg = `${r.msg} `;
+    }
+    p.cash = c.cents(p.cash - t.down - t.closing);
+    c.addDebt(state, p, { type: 'mortgage', name: 'Home mortgage', balance: t.loan, apr: t.rate, payment: t.payment });
+    p.home = { name: listing.name, value: listing.price, reIndex: state.market.reIndex, localMult: 1, boughtRound: state.round, purchasePrice: listing.price };
+    p.ownsHome = true;
+    p.expenses.housing = listing.ownerCosts;
+    c.log(state, `${p.name} bought a home: ${listing.name} for ${c.money(listing.price)}.`, 'good', p.id);
+    return { ok: true, msg: `${soldMsg}🏡 You bought the ${listing.name} for ${c.money(listing.price)}: ${c.money(t.down)} down + ${c.money(t.closing)} closing costs, and a ${c.money(t.loan)} mortgage at ${t.rate.toFixed(3)}% (${c.money(t.payment)}/mo). Taxes, insurance and upkeep add ${c.money(listing.ownerCosts)}/mo.` };
+  }
+
+  /**
+   * Sell the home you live in. opts.gross = a buyer's offer (default: market value).
+   * opts.rent = 'similar' | 'smaller' (move into a rental) or 'none' (buying another home).
+   */
+  function sellHome(state, p, opts) {
+    const c = C();
+    opts = opts || {};
+    if (!p.home) return { ok: false, msg: 'You don\'t own a home.' };
+    const market = c.homeValue(state, p);
+    const value = opts.gross != null ? opts.gross : market;
+    const fees = value * SELL_COSTS;
+    const m = c.homeMortgage(p);
+    const loan = m ? m.balance : 0;
+    const net = c.cents(value - fees - loan);
+    if (net < 0 && p.cash < -net) return { ok: false, msg: `Your home is "underwater": selling would leave ${c.money(-net)} of the mortgage unpaid, and you don't have the cash to cover it.` };
+    const gain = value - p.home.purchasePrice;
+    const name = p.home.name || 'your home';
+    p.cash = c.cents(p.cash + net);
+    if (m) p.debts = p.debts.filter((d) => d !== m);
+    p.home = null;
+    p.ownsHome = false;
+    let rentMsg = '';
+    if (opts.rent !== 'none') {
+      const rent = c.roundTo(rentFor(market) * (opts.rent === 'smaller' ? 0.7 : 1), 5);
+      p.expenses.housing = rent;
+      rentMsg = ` You moved into a ${opts.rent === 'smaller' ? 'smaller ' : ''}rental for ${c.money(rent)}/mo.`;
+    }
+    c.log(state, `${p.name} sold their home for ${c.money(value)}.`, 'neutral', p.id);
+    return { ok: true, msg: `Sold ${name === 'Your home' ? 'your home' : `the ${name}`} for ${c.money(value)} (${gain >= 0 ? 'up' : 'down'} ${c.money(Math.abs(gain))} from what it cost). After ${c.money(fees)} in selling costs${loan ? ' and paying off the mortgage' : ''} you received ${c.money(net)}.${rentMsg}` };
+  }
+
   // ------------------------------------------------------------------ analysis (educational)
   const METRIC_HELP = {
     coc: 'Cash-on-cash return: yearly cashflow ÷ the cash you put in. It tells you how hard YOUR money is working. Stock-market average is ~7–10%/yr.',
@@ -309,6 +416,9 @@
     return { metrics, verdict: v };
   }
 
-  MMS.Deals = { generate, build, purchase, capacity, sellProperty, sellBusiness, sellCollectible, sellNote, analyze, METRIC_HELP };
+  MMS.Deals = {
+    generate, build, purchase, capacity, sellProperty, sellBusiness, sellCollectible, sellNote, analyze, METRIC_HELP,
+    rentFor, homeListings, homePurchaseTerms, buyHome, sellHome, DOWN_OPTIONS, MAX_DTI
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.Deals;
 })(typeof window !== 'undefined' ? window : globalThis);
