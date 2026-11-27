@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="The in-depth money guide for Money Making Simulator: cashflow, debt, compound interest, CDs, stocks, fear and greed, real estate, options and a glossary.">
+  <title>The Money Guide — Money Making Simulator</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    .guide-top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 20px;
+      background: rgba(13, 13, 13, .92); border-bottom: 1px solid var(--border); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+    .guide-top .brand { font-weight: 800; font-size: 1.05rem; flex: 1; }
+    .guide-top input { max-width: 260px; }
+    .guide { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; max-width: 1180px; margin: 0 auto; padding: 22px 20px 80px; }
+    .toc { position: sticky; top: 72px; align-self: start; max-height: calc(100vh - 90px); overflow-y: auto; font-size: 14px; padding-right: 6px; }
+    .toc h4 { text-transform: uppercase; letter-spacing: .07em; font-size: 11px; color: var(--muted); margin: 16px 0 4px; }
+    .toc h4:first-child { margin-top: 0; }
+    .toc a { display: block; color: var(--text-2); text-decoration: none; padding: 3px 8px; border-radius: 6px; }
+    .toc a:hover, .toc a.active { color: var(--text); background: var(--surface); }
+    .hero { margin-bottom: 18px; text-align: left; padding: 0; }
+    .hero p { margin-left: 0; margin-right: 0; }
+    .hero h1 { font-size: 2rem; margin-bottom: .3em; }
+    .hero p { color: var(--text-2); font-size: 1.02rem; max-width: 760px; }
+    .part { margin: 34px 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--accent); font-weight: 800; }
+    section.lesson-sec { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 16px; }
+    section.lesson-sec h2 { font-size: 1.3rem; }
+    section.lesson-sec h3 { margin-top: 18px; font-size: 1.02rem; }
+    section.lesson-sec p, section.lesson-sec li { color: var(--text-2); }
+    section.lesson-sec li { margin-bottom: 5px; }
+    section.lesson-sec b, section.lesson-sec strong { color: var(--text); }
+    .tldr { background: rgba(74, 222, 128, .07); border: 1px solid rgba(74, 222, 128, .25); border-radius: 10px; padding: 9px 12px; margin-bottom: 12px; color: var(--text) !important; }
+    .example { background: var(--raised); border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 14.5px; }
+    .example b:first-child { color: var(--warn); }
+    .formula { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--raised-2); border-radius: 8px; padding: 8px 12px; margin: 8px 0; display: inline-block; font-size: 14px; color: var(--text); }
+    .in-game { border-left: 3px solid var(--blue); background: rgba(57, 135, 229, .08); border-radius: 0 10px 10px 0; padding: 8px 12px; margin-top: 12px; font-size: 14px; color: var(--text-2); }
+    .in-game::before { content: '🎮 In the game: '; font-weight: 700; color: var(--text); }
+    table.data.compact td, table.data.compact th { padding: 6px 8px; }
+    .calc { background: var(--raised); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 12px 0; }
+    .calc h3 { margin-top: 0 !important; }
+    .calc-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+    .calc-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+    .calc-row input, .calc-row select { width: 140px; }
+    .calc-out { margin-top: 10px; font-size: 15px; color: var(--text); }
+    .calc-out b { color: var(--good-text); font-variant-numeric: tabular-nums; }
+    dl.glossary { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0; margin: 0; }
+    dl.glossary dt, dl.glossary dd { padding: 8px 6px; border-bottom: 1px solid var(--grid); margin: 0; }
+    dl.glossary dt { font-weight: 700; color: var(--text); }
+    dl.glossary dd { color: var(--text-2); }
+    dl.glossary .hide { display: none; }
+    .back-top { font-size: 13px; text-decoration: none; }
+    .see-also { font-size: 13.5px; margin-top: 12px; color: var(--muted) !important; }
+    @media (max-width: 860px) {
+      .guide { grid-template-columns: 1fr; }
+      .toc { position: static; max-height: none; columns: 2; }
+      .toc h4 { break-after: avoid; }
+      dl.glossary { grid-template-columns: 1fr; }
+      dl.glossary dt { border-bottom: 0; padding-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="guide-top" id="top">
+    <div class="brand">📚 The Money Guide <span class="muted small">· Money Making Simulator</span></div>
+    <input type="search" id="guide-search" placeholder="Search the guide & glossary…" aria-label="Search the guide and glossary">
+    <a class="btn sm" href="index.html#continue">🎮 Back to the game</a>
+  </header>
+
+  <div class="guide">
+    <nav class="toc" aria-label="Contents">
+      <h4>Start here</h4>
+      <a href="#freedom">Financial freedom</a>
+      <a href="#cashflow">Cashflow</a>
+      <a href="#statements">Financial statements</a>
+      <a href="#assets">Assets vs. liabilities</a>
+      <h4>Everyday money</h4>
+      <a href="#emergency-fund">Emergency fund</a>
+      <a href="#lifestyle-creep">Lifestyle creep</a>
+      <a href="#earning-power">Your earning power</a>
+      <a href="#relationships">Money &amp; relationships</a>
+      <h4>Debt</h4>
+      <a href="#interest">Interest, APR &amp; APY</a>
+      <a href="#payoff">Paying off debt</a>
+      <a href="#good-debt">Good vs. bad debt</a>
+      <h4>Safe savings</h4>
+      <a href="#compound">Compound growth</a>
+      <a href="#cds">CDs (certificates of deposit)</a>
+      <a href="#bonds">Interest rates &amp; bonds</a>
+      <h4>Investing</h4>
+      <a href="#index-funds">Stocks &amp; index funds</a>
+      <a href="#dividends">Dividends &amp; yield</a>
+      <a href="#volatility">Volatility &amp; risk</a>
+      <a href="#diversification">Diversification</a>
+      <a href="#cycles">Economic cycles</a>
+      <a href="#fear-greed">Fear &amp; greed</a>
+      <a href="#speculation">Speculation vs. investing</a>
+      <h4>Real estate &amp; business</h4>
+      <a href="#leverage">Leverage</a>
+      <a href="#deals">Judging a deal</a>
+      <a href="#rent-vs-buy">Rent vs. buy</a>
+      <h4>Advanced</h4>
+      <a href="#options">Options</a>
+      <a href="#shorting">Short selling</a>
+      <h4>Reference</h4>
+      <a href="#glossary">Glossary A–Z</a>
+    </nav>
+
+    <main>
+      <div class="hero">
+        <h1>The Money Guide</h1>
+        <p>Everything the game teaches, explained step by step: what each idea means, why it matters, worked examples with real numbers, and how it shows up in Money Making Simulator. Read it front to back, jump to a topic from the game's <b>Learn</b> tab, or search the glossary.</p>
+        <p class="muted small">Numbers here are illustrative and rules differ by country. This guide is for learning — it is not financial advice.</p>
+      </div>
+
+      <!-- ============================================================ START HERE -->
+      <div class="part">Start here</div>
+
+      <section class="lesson-sec" id="freedom">
+        <h2>🏁 Financial freedom</h2>
+        <p class="tldr">You are financially free when your <b>passive income</b> — money that arrives whether or not you work — covers your living expenses.</p>
+        <p>Most people trade time for money: no work, no paycheck. Financial freedom (often called <b>financial independence</b>, or "FI") flips that around. Instead of working for money, you own things that pay you: rental properties, businesses, dividend-paying stocks, bonds, CDs and loans you've made to others.</p>
+        <h3>Two ways to get there</h3>
+        <ul>
+          <li><b>Grow passive income</b> by buying assets that pay you every month.</li>
+          <li><b>Shrink expenses.</b> Every dollar you cut from your monthly bills is a dollar of passive income you no longer need. Cutting expenses works twice: it frees up cash to invest <em>and</em> lowers the finish line.</li>
+        </ul>
+        <h3>How much is "enough"?</h3>
+        <p>A popular rule of thumb in the real world is the <b>4% rule</b>: if you can live on 4% of your investments per year, your money has historically lasted 30 years or more. That means you need about <b>25×</b> your yearly expenses invested.</p>
+        <div class="example"><b>Example.</b> You spend $4,000 a month ($48,000 a year). 25 × $48,000 = <b>$1.2 million</b> invested. Cut spending to $3,000 a month and you need only $900,000 — $300,000 less.</div>
+        <p class="in-game">You win when passive income reaches <b>2×</b> your total monthly expenses (living costs + children + debt payments). The extra margin is a safety cushion: rentals sit empty, businesses have bad months and dividends get cut. Paying off a debt lowers your expenses <em>and</em> your target.</p>
+      </section>
+
+      <section class="lesson-sec" id="cashflow">
+        <h2>💵 Cashflow</h2>
+        <p class="tldr"><b>Cashflow = money in − money out</b>, every month. Positive cashflow is the fuel you invest; negative cashflow slowly drains you.</p>
+        <p>Cashflow is the single most important number in personal finance, because everything else depends on it. A high salary with even higher spending leaves you with nothing to invest. A modest salary with low expenses can build real wealth.</p>
+        <h3>Savings rate</h3>
+        <p>Your <b>savings rate</b> is cashflow ÷ income. It tells you how fast you're moving toward freedom, regardless of how much you earn.</p>
+        <table class="data compact"><thead><tr><th>Savings rate</th><th>Roughly how long to financial independence*</th></tr></thead>
+          <tbody><tr><td>10%</td><td>~50 years</td></tr><tr><td>25%</td><td>~32 years</td></tr><tr><td>50%</td><td>~17 years</td></tr><tr><td>75%</td><td>~7 years</td></tr></tbody></table>
+        <p class="muted small">*A classic back-of-the-envelope estimate assuming 5% real returns and the 4% rule, starting from zero.</p>
+        <p class="in-game">Your cashflow is at the bottom of the statement on the left side of the screen, and the <b>Financials</b> tab shows your savings rate.</p>
+      </section>
+
+      <section class="lesson-sec" id="statements">
+        <h2>🧾 Financial statements</h2>
+        <p class="tldr">An <b>income statement</b> shows the money flowing in and out over a period. A <b>balance sheet</b> is a snapshot of what you own and owe at one moment.</p>
+        <p>Every company publishes these, and they work just as well for a person. Together they answer two different questions: <em>"Am I getting ahead each month?"</em> and <em>"What has it all added up to?"</em></p>
+        <h3>The income statement</h3>
+        <ul>
+          <li><b>Earned income</b> — salary and side gigs. Stops when you stop working.</li>
+          <li><b>Passive income</b> — rent, business profits, dividends and interest. Keeps coming.</li>
+          <li><b>Expenses</b> — living costs, family costs, and debt payments.</li>
+          <li><b>Net cashflow</b> — what's left. This is what you can invest.</li>
+        </ul>
+        <p>Investments are usually shown <b>net</b>: a rental's rent minus its operating expenses and mortgage payment. A $2,000 rent with $700 of expenses and a $1,100 mortgage payment only puts <b>$200</b> in your pocket.</p>
+        <h3>Interest vs. principal</h3>
+        <p>A loan payment has two parts. The <b>interest</b> is the lender's fee — a true cost. The <b>principal</b> pays back what you borrowed, so it's really moving money from your pocket into lower debt (your net worth doesn't drop). Early in a loan most of the payment is interest; by the end it's nearly all principal.</p>
+        <h3>The balance sheet</h3>
+        <p class="formula">Net worth = Assets − Liabilities</p>
+        <p>Your home counts toward net worth but not toward passive income — it doesn't pay you rent. A new car is an asset on paper, but it loses value every year and its loan is a liability that costs you every month.</p>
+        <p class="in-game">The <b>🧾 Financials</b> tab has your full income statement (every rental, business, dividend, note and CD; every expense; each debt split into interest and principal), your balance sheet, key ratios and a chart of income vs. expenses over time.</p>
+      </section>
+
+      <section class="lesson-sec" id="assets">
+        <h2>⚖️ Assets vs. liabilities</h2>
+        <p class="tldr">A useful everyday definition: an <b>asset</b> puts money <em>into</em> your pocket; a <b>liability</b> takes money <em>out</em>.</p>
+        <p>Accountants define assets as anything of value you own. But for building freedom, what matters is cashflow. A boat you own outright is technically an asset — but with fuel, storage, insurance and repairs, it costs you every month. A small rental that nets $250 a month pays you.</p>
+        <ul>
+          <li><b>Income-producing assets:</b> rentals, businesses, dividend stocks, bonds, CDs, lending notes.</li>
+          <li><b>Growth assets:</b> stocks that pay no dividend, land, gold, crypto, collectibles. They can make you richer when you sell, but don't pay the bills along the way.</li>
+          <li><b>Liabilities:</b> credit cards, car loans, student loans, personal loans — and things that cost upkeep.</li>
+        </ul>
+        <p>Wealth grows when your cashflow buys assets. It stalls when your cashflow buys liabilities.</p>
+      </section>
+
+      <!-- ============================================================ EVERYDAY MONEY -->
+      <div class="part">Everyday money</div>
+
+      <section class="lesson-sec" id="emergency-fund">
+        <h2>🛟 Emergency fund</h2>
+        <p class="tldr">Keep <b>3–6 months of expenses</b> in cash you can reach quickly.</p>
+        <p>Car repairs, medical bills and layoffs aren't rare — they're a normal part of life. Without savings, every surprise lands on a credit card at 20–28% interest, and one bad month can snowball into years of debt.</p>
+        <ul>
+          <li>Start with a small goal ($1,000) and build toward 3 months, then 6.</li>
+          <li>More if your income is irregular, you're the only earner, or you have kids.</li>
+          <li>Keep it boring and reachable: a savings account, or part of it in short CDs (3–6 months) if you accept a small penalty to break one.</li>
+        </ul>
+        <p class="in-game">Layoffs last 1–6 months, and surprise bills pop up about one turn in four. The Money coach warns you when you have less than 3 months of expenses in cash.</p>
+      </section>
+
+      <section class="lesson-sec" id="lifestyle-creep">
+        <h2>📈 Lifestyle creep</h2>
+        <p class="tldr">When income rises, spending tends to rise right along with it — so you never actually get ahead.</p>
+        <p>A raise feels like a reason to upgrade: a nicer apartment, a newer car, more dinners out. Each upgrade seems small, but together they quietly absorb the raise. That's why some people with big salaries still live paycheck to paycheck.</p>
+        <p>A simple defense: when your income goes up, decide in advance how much of the raise you'll save (say, at least half) before it hits your checking account.</p>
+        <div class="example"><b>Example.</b> Cutting $300 a month of expenses doesn't just save $3,600 a year. In this game it lowers your freedom target by $600/mo (at 2×) — the same as buying an asset that pays $600 a month.</div>
+        <p class="in-game">Luxury temptations show up about one turn in four, more often for lavish lifestyles. The Debt &amp; Budget tab lets you downshift to a cheaper lifestyle.</p>
+      </section>
+
+      <section class="lesson-sec" id="earning-power">
+        <h2>💼 Your earning power</h2>
+        <p class="tldr">Early in life, your ability to earn is usually your biggest asset.</p>
+        <p>A 3% raise sounds small, but it repeats every year for the rest of your career and compounds just like investments do. Skills, certifications, a professional network and a good reputation — together called <b>human capital</b> — are investments that pay off for decades.</p>
+        <ul>
+          <li><b>Raises</b> are small permanent bumps; <b>promotions</b> are bigger jumps that come with new responsibilities.</li>
+          <li><b>Networking</b> costs time and money up front but makes opportunities and new jobs easier to find.</li>
+          <li><b>Student loans</b> are an investment in earning power — worth it when the degree raises your income by much more than the payments.</li>
+        </ul>
+      </section>
+
+      <section class="lesson-sec" id="relationships">
+        <h2>💞 Money &amp; relationships</h2>
+        <p class="tldr">Sharing a household is a big financial advantage; weddings, children and divorce are some of life's biggest expenses.</p>
+        <p>Two people don't need two kitchens, two internet bills or two sets of furniture, so a couple's household costs much less than twice a single person's. But a lavish wedding can cost a year of savings, raising a child costs thousands a year, and divorce brings legal fees and splits savings in half. Money disagreements are one of the most common sources of relationship stress — talking about money goals early helps.</p>
+        <p class="in-game">A spouse pays half of the household bills (including the home mortgage), parents split children's costs, and a divorce costs legal fees plus half of your cash, stocks and CDs.</p>
+      </section>
+
+      <!-- ============================================================ DEBT -->
+      <div class="part">Debt</div>
+
+      <section class="lesson-sec" id="interest">
+        <h2>💳 Interest, APR &amp; APY</h2>
+        <p class="tldr"><b>Interest</b> is the price of borrowing money. <b>APR</b> is its yearly rate. <b>APY</b> adds in the effect of compounding.</p>
+        <h3>APR — annual percentage rate</h3>
+        <p>The yearly interest rate on a loan. Credit cards charge interest monthly at APR ÷ 12 on your balance.</p>
+        <div class="example"><b>Example.</b> A $5,000 card balance at 24% APR costs 2% a month: <b>$100</b> of interest in the first month alone.</div>
+        <h3>APY — annual percentage yield</h3>
+        <p>APY includes <b>compounding</b> — interest earning interest. It's the honest way to compare savings accounts and CDs. 5% APR compounded monthly is about 5.12% APY.</p>
+        <p class="formula">APY = (1 + APR ÷ n)<sup>n</sup> − 1 &nbsp;&nbsp;(n = compounding periods per year)</p>
+        <h3>The minimum-payment trap</h3>
+        <p>Credit-card minimums are usually around 1–3% of the balance. Paying only the minimum keeps you in debt for years — most of every payment goes to interest. Paying off a 25% card is like earning a <b>guaranteed 25% return</b>, better than almost any investment.</p>
+        <div class="calc" id="loan-calc">
+          <h3>🧮 Debt payoff calculator</h3>
+          <div class="calc-row">
+            <label>Balance ($)<input type="number" id="lc-bal" value="5000" min="0" step="100"></label>
+            <label>APR (%)<input type="number" id="lc-apr" value="24" min="0" step="0.5"></label>
+            <label>Monthly payment ($)<input type="number" id="lc-pay" value="150" min="0" step="10"></label>
+          </div>
+          <div class="calc-out" id="lc-out" aria-live="polite"></div>
+        </div>
+        <p class="in-game">The Debt &amp; Budget tab shows each debt's APR, the interest it charges this month, months to payoff and the interest left to pay.</p>
+      </section>
+
+      <section class="lesson-sec" id="payoff">
+        <h2>❄️ Paying off debt: avalanche vs. snowball</h2>
+        <p class="tldr">The <b>avalanche</b> pays the highest rate first (cheapest overall). The <b>snowball</b> pays the smallest balance first (quick wins).</p>
+        <ul>
+          <li><b>Avalanche:</b> make minimum payments on everything, then throw every extra dollar at the highest-APR debt. Mathematically, this saves the most interest.</li>
+          <li><b>Snowball:</b> pay off the smallest balance first, then roll its payment into the next. Each payoff frees up a whole monthly payment, which builds momentum and motivation.</li>
+        </ul>
+        <p>Both work far better than paying minimums forever. Extra payments on a fixed loan (car, student, mortgage) usually don't lower the monthly payment — they finish the loan sooner and save interest. Paying down a credit card does lower its minimum payment.</p>
+        <p class="in-game">Every debt you pay off removes its payment from your expenses <em>and</em> lowers your freedom target by 2× that payment.</p>
+      </section>
+
+      <section class="lesson-sec" id="good-debt">
+        <h2>🏗️ Good debt vs. bad debt</h2>
+        <p class="tldr">"Good" debt buys something that earns more than the debt costs. "Bad" debt buys things that lose value.</p>
+        <ul>
+          <li><b>Usually good:</b> a mortgage on a rental whose rent covers the payment with money left over; a business loan for equipment that produces profit; education that raises your pay.</li>
+          <li><b>Usually bad:</b> vacations, gadgets and shopping on a credit card; an expensive car loan; a boat.</li>
+        </ul>
+        <p>"Good" debt still has risk: if the rental sits empty or the business has a bad year, the payment is still due. Lenders check your <b>debt-to-income ratio</b> (debt payments ÷ gross income) — many won't lend above about 36–43%.</p>
+      </section>
+
+      <!-- ============================================================ SAFE SAVINGS -->
+      <div class="part">Safe savings</div>
+
+      <section class="lesson-sec" id="compound">
+        <h2>❄️ Compound growth</h2>
+        <p class="tldr">When your earnings are reinvested, they start earning money of their own. Over long periods, this snowball is enormous.</p>
+        <p class="formula">Future value = P × (1 + r)<sup>t</sup></p>
+        <p>where P is what you start with, r the yearly return and t the number of years. The <b>Rule of 72</b> is a handy shortcut: divide 72 by your yearly return to estimate how many years it takes your money to double. At 8%, about 9 years; at 4%, about 18.</p>
+        <div class="example"><b>Example.</b> $10,000 at 8% a year grows to about $21,600 in 10 years, $46,600 in 20 and $100,600 in 30. The last 10 years add more than the first 20 combined — that's compounding.</div>
+        <p>Compounding works against you too: credit-card interest compounds, which is why balances can balloon.</p>
+        <div class="calc" id="growth-calc">
+          <h3>🧮 Compound growth calculator</h3>
+          <div class="calc-row">
+            <label>Starting amount ($)<input type="number" id="gc-start" value="1000" min="0" step="100"></label>
+            <label>Added each month ($)<input type="number" id="gc-monthly" value="300" min="0" step="25"></label>
+            <label>Yearly return (%)<input type="number" id="gc-rate" value="7" step="0.5"></label>
+            <label>Years<input type="number" id="gc-years" value="20" min="1" max="60" step="1"></label>
+          </div>
+          <div class="calc-out" id="gc-out" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="lesson-sec" id="cds">
+        <h2>🏦 CDs (certificates of deposit)</h2>
+        <p class="tldr">A CD is a deal with a bank: you leave a set amount with it for a fixed term, and it pays you a fixed, guaranteed rate.</p>
+        <h3>How a CD works</h3>
+        <ul>
+          <li><b>Term:</b> how long your money is locked up — commonly 3 months to 5 years.</li>
+          <li><b>APY:</b> the yearly yield, including compounding. It's fixed for the whole term, even if rates change.</li>
+          <li><b>Minimum deposit:</b> often $500–$1,000; special "promo" CDs may require more.</li>
+          <li><b>Maturity:</b> at the end of the term you get your money back plus interest. Many banks automatically roll it into a new CD unless you tell them otherwise.</li>
+          <li><b>Interest payout:</b> some CDs pay interest out monthly; others let it compound inside the CD until maturity.</li>
+        </ul>
+        <h3>The trade-off: safety and a fixed rate vs. access</h3>
+        <p>Bank deposits are insured by the government — in the U.S., by the FDIC (or the NCUA for credit unions) up to $250,000 per depositor, per bank, per ownership category. So a CD can't lose money… unless you need it early. Cashing out before maturity triggers an <b>early-withdrawal penalty</b>, typically 3 months of interest for short CDs and 6–12 months for longer ones. Break a CD very early and the penalty can eat into your deposit.</p>
+        <h3>Why rates differ</h3>
+        <ul>
+          <li><b>The central bank rate.</b> CD rates rise and fall with it.</li>
+          <li><b>The bank.</b> Online banks and credit unions often pay far more than big branch banks for the exact same insured deposit. Shopping around is free money.</li>
+          <li><b>The term — the yield curve.</b> Normally, longer terms pay more as a reward for locking money up. But when rates are high and expected to fall, the curve <b>inverts</b>: short CDs pay more than long ones, because banks don't want to promise today's high rate for years.</li>
+        </ul>
+        <h3>CD ladders</h3>
+        <p>Instead of one big CD, split your savings across several that mature at different times — say, 3, 6, 12 and 24 months. When one matures, either use the money or reinvest it at the long end. A ladder gives you regular access to some cash while still capturing longer-term rates, and it means you never have to guess the perfect moment to lock in.</p>
+        <div class="example"><b>Example.</b> $20,000 split into four $5,000 CDs at 1, 2, 3 and 4 years. Every year one matures; reinvest it in a new 4-year CD. After three years, all four are 4-year CDs (earning the higher long-term rate) — and one still matures every year.</div>
+        <h3>Where CDs fit</h3>
+        <p>CDs are a great home for money you'll need on a known date (a down payment next year) or for the part of your savings you want to keep completely safe. They're not a road to riches: after inflation and taxes, CD returns are modest. Rentals, businesses and stocks can earn much more — with much more risk.</p>
+        <div class="calc" id="cd-calc">
+          <h3>🧮 CD calculator</h3>
+          <div class="calc-row">
+            <label>Deposit ($)<input type="number" id="cd-dep" value="10000" min="0" step="500"></label>
+            <label>APY (%)<input type="number" id="cd-apy" value="4.5" min="0" step="0.05"></label>
+            <label>Term (months)<input type="number" id="cd-term" value="12" min="1" max="120" step="1"></label>
+            <label>Cash out after (months)<input type="number" id="cd-early" value="" min="0" step="1" placeholder="hold to maturity"></label>
+          </div>
+          <div class="calc-out" id="cd-out" aria-live="polite"></div>
+        </div>
+        <p class="in-game">The <b>🏦 Savings &amp; CDs</b> tab shows three fictional banks' rates for six terms, plus occasional specials. Rates change every month with the central bank rate. Choose monthly interest (counts as passive income) or compounding (a bit more money, but only at maturity). Penalties: 3 months of interest under 12 months, 6 months for 1–2 years, 12 months for 3–5 years.</p>
+      </section>
+
+      <section class="lesson-sec" id="bonds">
+        <h2>🏛️ Interest rates &amp; bonds</h2>
+        <p class="tldr">When interest rates rise, existing bonds lose value — and when rates fall, they gain.</p>
+        <p>A bond is a loan to a government or company that pays a fixed interest rate. Imagine you own a bond paying 3%, and new bonds start paying 5%. Nobody will pay full price for your 3% bond anymore, so its price falls until its yield matches the market.</p>
+        <p><b>Duration</b> measures how sensitive a bond is to rate changes: a fund with a duration of 6 falls roughly 6% for each 1-percentage-point rise in rates. The silver lining: as old bonds mature, the fund buys new ones at the higher rates, so its payouts rise.</p>
+        <h3>Who sets interest rates?</h3>
+        <p>A <b>central bank</b> sets a short-term benchmark rate. It cuts rates to stimulate a slow economy and raises them to cool inflation. Mortgage rates, credit-card rates, loan rates and CD rates all move with it.</p>
+        <p class="in-game">The central bank rate is in the top bar. It drives mortgage rates, bank-loan rates, CD rates, the bond fund's price and the REIT's price.</p>
+      </section>
+
+      <!-- ============================================================ INVESTING -->
+      <div class="part">Investing</div>
+
+      <section class="lesson-sec" id="index-funds">
+        <h2>🗽 Stocks &amp; index funds</h2>
+        <p class="tldr">A share of stock is a small piece of ownership in a company. An index fund owns a slice of hundreds of companies at once.</p>
+        <p>When a company grows its profits, its shares tend to become more valuable, and many companies share profits with owners as <b>dividends</b>. But any single company can stumble: a failed product, a scandal, a new competitor.</p>
+        <p>An <b>index fund</b> spreads your money across a whole market — for example, 500 of the largest companies. Its fees are tiny, it never needs a stock-picker, and over long periods most professional fund managers fail to beat it after fees. For many people, a low-cost index fund is the core of a long-term portfolio.</p>
+        <p class="in-game">The Liberty 500 Index Fund is the game's diversified fund: about 15% yearly volatility, steady long-run growth and a small, growing dividend.</p>
+      </section>
+
+      <section class="lesson-sec" id="dividends">
+        <h2>💸 Dividends &amp; yield</h2>
+        <p class="tldr">Dividends are profits paid to shareholders. <b>Yield</b> = yearly dividends ÷ price.</p>
+        <p class="formula">Dividend yield = annual dividend per share ÷ share price</p>
+        <div class="example"><b>Example.</b> A stock pays $2 a year per share and trades at $50: a 4% yield. $10,000 invested pays about $400 a year — $33 a month.</div>
+        <ul>
+          <li>Healthy companies tend to <b>raise</b> dividends over time, so your income grows even if you never buy another share.</li>
+          <li>A very high yield can be a warning sign: the price may have fallen because investors expect a <b>dividend cut</b>.</li>
+          <li>Growth companies often pay little or nothing, reinvesting profits instead. They can make you richer when you sell, but they don't pay the bills.</li>
+        </ul>
+      </section>
+
+      <section class="lesson-sec" id="volatility">
+        <h2>🎢 Volatility &amp; risk</h2>
+        <p class="tldr">Volatility measures how much a price swings. Higher expected returns usually come with bigger swings.</p>
+        <p>Volatility is usually given as the <b>standard deviation</b> of yearly returns. If a fund averages 8% a year with 15% volatility, about two years in three land between −7% and +23%, and about one year in twenty is worse than −17%.</p>
+        <ul>
+          <li><b>Drawdown:</b> the fall from a peak to a later low. Even broad stock markets have fallen 30–50% in severe crashes.</li>
+          <li><b>Volatility clusters:</b> wild months tend to follow wild months, and calm follows calm.</li>
+          <li><b>Fat tails:</b> extreme moves happen more often than a simple bell curve predicts.</li>
+        </ul>
+        <p>Risk isn't just volatility. It's also the chance you'll be <em>forced</em> to sell at a bad time — which is why an emergency fund and avoiding too much debt make you a better investor.</p>
+      </section>
+
+      <section class="lesson-sec" id="diversification">
+        <h2>🧺 Diversification</h2>
+        <p class="tldr">Own many different investments, so no single disaster can sink you.</p>
+        <p>The key is <b>correlation</b> — whether investments move together (+1), independently (0) or in opposite directions (−1). Combining things that don't move in lockstep smooths out the ride without giving up much return. Gold and high-quality bonds have often held up when stocks fell.</p>
+        <p>Diversify across companies, industries, asset types (stocks, bonds, real estate, cash) and income sources. Having all your wealth in your employer's stock, or in one rental in one neighborhood, is concentrated risk.</p>
+      </section>
+
+      <section class="lesson-sec" id="cycles">
+        <h2>🔄 Economic cycles</h2>
+        <p class="tldr">Economies alternate between expansions and recessions.</p>
+        <ul>
+          <li><b>Expansion / boom:</b> jobs are plentiful, profits rise, stocks tend to climb. Cyclical companies (cars, tech, travel) do best.</li>
+          <li><b>Recession:</b> layoffs rise, profits fall, stocks drop — cyclical ones hardest. Defensive sectors (groceries, healthcare, utilities), bonds and gold tend to hold up better.</li>
+        </ul>
+        <p>Markets look ahead: stocks often fall <em>before</em> a recession is official and recover while the news still feels gloomy. Recessions also create bargains for people with cash ready.</p>
+      </section>
+
+      <section class="lesson-sec" id="fear-greed">
+        <h2>😨 Fear &amp; greed</h2>
+        <p class="tldr">Prices aren't moved only by facts. Waves of fear and greed push them further than the news alone would — and those mood-driven moves tend to reverse.</p>
+        <h3>The Fear &amp; Greed index</h3>
+        <p>A well-known real-world Fear &amp; Greed Index (published by CNN Business) boils investor mood down to one number from 0 to 100, built from seven market signals:</p>
+        <ul>
+          <li><b>Market momentum</b> — the stock market vs. its average of the last 125 trading days.</li>
+          <li><b>Stock price strength</b> — how many stocks are hitting 52-week highs vs. lows.</li>
+          <li><b>Stock price breadth</b> — how much trading volume is flowing into rising vs. falling stocks.</li>
+          <li><b>Put and call options</b> — whether investors are buying more protection (puts) or more bets on gains (calls).</li>
+          <li><b>Junk bond demand</b> — how much extra yield investors demand to hold risky bonds.</li>
+          <li><b>Market volatility</b> — the VIX, the market's "fear gauge".</li>
+          <li><b>Safe-haven demand</b> — stocks' returns vs. safer Treasury bonds.</li>
+        </ul>
+        <h3>How emotions move markets</h3>
+        <ul>
+          <li><b>Herding and FOMO:</b> when prices rise, people pile in so they don't miss out, which pushes prices higher still. Taken far enough, this becomes a <b>bubble</b>.</li>
+          <li><b>Loss aversion:</b> losses hurt about twice as much as equal gains feel good, so falling prices can trigger <b>panic selling</b>.</li>
+          <li><b>Overconfidence:</b> after a run of gains, investors feel invincible, borrow more and take bigger bets.</li>
+          <li><b>Flight to safety:</b> in fearful markets, money rushes out of stocks and into bonds, gold and cash.</li>
+        </ul>
+        <h3>Why it matters to you</h3>
+        <p>Because mood-driven moves tend to fade, following the crowd usually means buying high and selling low. Warren Buffett's famous advice is to be "fearful when others are greedy and greedy when others are fearful". That doesn't mean timing the market perfectly — nobody can — but it does mean:</p>
+        <ul>
+          <li>In <b>extreme greed</b>, check your diversification and resist going all-in on whatever is hottest.</li>
+          <li>In <b>extreme fear</b>, don't panic-sell good investments. Keep investing steadily if you can; that's when bargains appear.</li>
+          <li>Decide your plan when you're calm, so you're not making decisions in the heat of the moment. <b>Dollar-cost averaging</b> — investing the same amount every month — takes emotion out of the timing.</li>
+        </ul>
+        <p class="in-game">The Fear &amp; Greed index in the top bar (and on the Stocks tab) runs from 0 to 100. It climbs when prices rise and news is exciting, and falls after drops, crashes and scary headlines. <b>Greed</b> gives stocks an extra push up (crypto and speculative stocks most), calms volatility, and makes bubbles and crashes more likely. <b>Fear</b> pushes stocks down, bonds and gold up, and makes swings bigger. Moves driven by mood fade over the following months, so — as in the real world — the year after extreme fear has tended to be better for stocks than the year after extreme greed. Easy bots follow the crowd: they panic-sell in fear and chase in greed.</p>
+      </section>
+
+      <section class="lesson-sec" id="speculation">
+        <h2>🎰 Speculation vs. investing</h2>
+        <p class="tldr"><b>Investing</b> means buying something for the income or value it produces. <b>Speculating</b> means betting on a price move.</p>
+        <p>Buying a rental for its rent, or an index fund for the profits of 500 companies, is investing. Buying a penny stock because of a tip, or a cryptocurrency because it doubled last month, is speculating. Speculation can pay off — but it isn't a plan, and the losers often outnumber the winners. If you speculate, keep it to a small slice you can afford to lose.</p>
+        <p>Watch out for <b>hot tips</b> and rumors: by the time you hear one, it's often already priced in — or untrue.</p>
+      </section>
+
+      <!-- ============================================================ REAL ESTATE & BUSINESS -->
+      <div class="part">Real estate &amp; business</div>
+
+      <section class="lesson-sec" id="leverage">
+        <h2>🏠 Leverage</h2>
+        <p class="tldr">Leverage is using borrowed money to control a bigger asset. It magnifies gains <em>and</em> losses.</p>
+        <div class="example"><b>Example.</b> You buy a $200,000 property with $20,000 down (10%) and a $180,000 mortgage. If its value rises 10% to $220,000, your $20,000 has become $40,000 of equity — a 100% gain. If it falls 10%, your equity is wiped out.</div>
+        <p>Leverage also adds a fixed monthly payment. If the property sits empty, the mortgage is still due. Modest leverage on assets with strong, steady cashflow is how many fortunes are built; heavy leverage on shaky assets is how many are lost.</p>
+      </section>
+
+      <section class="lesson-sec" id="deals">
+        <h2>📐 Judging a deal</h2>
+        <p class="tldr">Before you buy, ask: how much cash goes in, how much comes out each month, and what could go wrong?</p>
+        <table class="data compact"><thead><tr><th>Metric</th><th>Formula</th><th>What it tells you</th></tr></thead><tbody>
+          <tr><td><b>NOI</b> (net operating income)</td><td>Rent − operating expenses</td><td>What the property earns before any mortgage.</td></tr>
+          <tr><td><b>Cap rate</b></td><td>Yearly NOI ÷ price</td><td>The return if you paid all cash. Lets you compare properties.</td></tr>
+          <tr><td><b>Cash-on-cash return</b></td><td>Yearly cashflow ÷ cash invested</td><td>The return on <em>your</em> money, after the mortgage.</td></tr>
+          <tr><td><b>1% rule</b></td><td>Monthly rent ≥ 1% of price</td><td>A quick screen for rentals likely to cashflow.</td></tr>
+          <tr><td><b>DSCR</b> (debt-service coverage)</td><td>NOI ÷ loan payments</td><td>Above ~1.25 means the rent comfortably covers the loan.</td></tr>
+          <tr><td><b>LTV</b> (loan-to-value)</td><td>Loan ÷ property value</td><td>How much leverage — higher is riskier.</td></tr>
+          <tr><td><b>Payback period</b></td><td>Cash invested ÷ monthly cashflow</td><td>Months until the deal has paid back your cash.</td></tr>
+          <tr><td><b>ARV</b> (after-repair value)</td><td>Value once renovated</td><td>What a fixer-upper should be worth after the work.</td></tr>
+        </tbody></table>
+        <div class="example"><b>Example.</b> A $150,000 duplex: rent $1,800, expenses $650, mortgage $790. NOI = $1,150/mo → cap rate 9.2%. Cashflow = $360/mo. With 20% down ($30,000) plus 3% closing costs ($4,500), cash-on-cash = $4,320 a year ÷ $34,500 ≈ 12.5%.</div>
+        <p>Businesses are often valued as a multiple of their profit — in the game, about 2.5 years of profit for a business and 1.5 for a side project.</p>
+        <p class="in-game">Every deal shows these numbers with a verdict, and how the deal would move your freedom meter.</p>
+      </section>
+
+      <section class="lesson-sec" id="rent-vs-buy">
+        <h2>🏡 Rent vs. buy</h2>
+        <p class="tldr">Neither is always better. Compare the full monthly cost — and what your cash could earn elsewhere.</p>
+        <ul>
+          <li><b>Buying</b> builds equity, fixes your payment and can grow in value, but costs a down payment, closing costs (~2–5%), property taxes, insurance, maintenance (~1% of value a year) and about 6% to sell.</li>
+          <li><b>Renting</b> is flexible, the landlord pays for repairs, and your down payment stays free to invest.</li>
+          <li>Your home is part of your net worth, but it doesn't pay you passive income — it costs money every month.</li>
+        </ul>
+        <p>A common guideline is to keep housing costs under about 28–30% of your gross income.</p>
+      </section>
+
+      <!-- ============================================================ ADVANCED -->
+      <div class="part">Advanced</div>
+
+      <section class="lesson-sec" id="options">
+        <h2>🎯 Options</h2>
+        <p class="tldr">An option is a contract giving the right — but not the obligation — to buy or sell 100 shares at a set price before a set date.</p>
+        <ul>
+          <li><b>Call:</b> the right to <em>buy</em> at the strike price. Profits if the stock rises well above the strike.</li>
+          <li><b>Put:</b> the right to <em>sell</em> at the strike price. Profits if the stock falls, or insures shares you own.</li>
+          <li><b>Strike:</b> the agreed price. <b>Expiry:</b> the last day. <b>Premium:</b> what the option costs.</li>
+          <li><b>Intrinsic value:</b> what it's worth if exercised now. <b>Time value:</b> the rest of the premium — the chance it gains before expiry. Time value melts away as expiry approaches ("time decay").</li>
+          <li><b>Straddle:</b> a call and a put at the same strike — a bet on a big move in either direction.</li>
+        </ul>
+        <p>The <b>Black–Scholes</b> formula prices options from five inputs: the stock price, the strike, the time left, interest rates and — most important — <b>volatility</b>. More volatility means a bigger chance of a large move, so options cost more.</p>
+        <div class="example"><b>Example.</b> A stock trades at $100. A 3-month call with a $100 strike costs $4 per share ($400 per contract). If the stock is $112 at expiry, the call is worth $12 ($1,200): a 200% gain. If it's $100 or below, the call expires worthless and the $400 is gone.</div>
+        <p>Options are <b>leverage</b>: a small premium controls a lot of stock. Most options bought by individuals expire worthless — keep them a small slice of your investments.</p>
+      </section>
+
+      <section class="lesson-sec" id="shorting">
+        <h2>🔻 Short selling</h2>
+        <p class="tldr">Shorting is borrowing shares, selling them now, and buying them back later — profiting if the price falls.</p>
+        <ul>
+          <li><b>Unlimited risk:</b> a stock can only fall to $0, but it can rise without limit — so can a short seller's losses.</li>
+          <li><b>Margin:</b> brokers require collateral and charge a <b>borrow fee</b>; you also owe any dividends paid while you're short.</li>
+          <li><b>Margin call:</b> if the price rises too far, the broker demands more collateral or forces you to buy back at a loss.</li>
+          <li><b>Short squeeze:</b> when many short sellers rush to buy back at once, their buying drives the price even higher.</li>
+        </ul>
+      </section>
+
+      <!-- ============================================================ GLOSSARY -->
+      <div class="part">Reference</div>
+
+      <section class="lesson-sec" id="glossary">
+        <h2>📖 Glossary A–Z</h2>
+        <p class="muted small">Type in the search box at the top to filter the glossary.</p>
+        <p class="muted small" id="gl-empty" hidden>No glossary terms match your search.</p>
+        <dl class="glossary" id="glossary-list">
+          <dt>Amortization</dt><dd>Paying off a loan with fixed payments over time. Each payment covers that month's interest, and the rest reduces the principal.</dd>
+          <dt>APR</dt><dd>Annual percentage rate — the yearly interest rate on a loan, without compounding.</dd>
+          <dt>APY</dt><dd>Annual percentage yield — the yearly return on savings including compounding. Use it to compare savings accounts and CDs.</dd>
+          <dt>Asset</dt><dd>Something you own that has value. For building freedom: something that puts money in your pocket.</dd>
+          <dt>Asset allocation</dt><dd>How your money is split among asset types (stocks, bonds, real estate, cash…).</dd>
+          <dt>Balance sheet</dt><dd>A snapshot of what you own (assets) and owe (liabilities) at one moment. Assets − liabilities = net worth.</dd>
+          <dt>Bear market</dt><dd>A market that has fallen 20% or more from its high.</dd>
+          <dt>Beta</dt><dd>How much a stock tends to move with the overall market. Beta 1.5 ≈ moves 1.5× as much.</dd>
+          <dt>Bond</dt><dd>A loan to a government or company that pays fixed interest and returns your money at maturity.</dd>
+          <dt>Bubble</dt><dd>When prices rise far above what the underlying profits justify, driven by excitement — usually followed by a sharp fall.</dd>
+          <dt>Bull market</dt><dd>A long period of rising prices.</dd>
+          <dt>Call option</dt><dd>The right to buy 100 shares at the strike price before expiry.</dd>
+          <dt>Cap rate</dt><dd>A property's yearly net operating income ÷ its price — its return if bought with all cash.</dd>
+          <dt>Capital gain</dt><dd>Profit from selling something for more than you paid.</dd>
+          <dt>Cash-on-cash return</dt><dd>Yearly cashflow ÷ the cash you invested. The return on your own money after the loan.</dd>
+          <dt>Cashflow</dt><dd>Money in minus money out over a period, usually a month.</dd>
+          <dt>CD (certificate of deposit)</dt><dd>A bank deposit locked up for a fixed term at a fixed rate, with a penalty for early withdrawal.</dd>
+          <dt>CD ladder</dt><dd>Several CDs with staggered maturity dates, so some money frees up regularly while still earning longer-term rates.</dd>
+          <dt>Central bank</dt><dd>The institution that sets a country's benchmark interest rate (the Federal Reserve in the U.S.).</dd>
+          <dt>Collateral</dt><dd>Something pledged to a lender that it can take if you don't repay.</dd>
+          <dt>Compound interest</dt><dd>Earning interest on your interest, so growth speeds up over time.</dd>
+          <dt>Correlation</dt><dd>How closely two investments move together, from −1 (opposite) through 0 (unrelated) to +1 (in lockstep).</dd>
+          <dt>Credit score</dt><dd>A number lenders use to judge how likely you are to repay. Paying on time and keeping balances low raise it.</dd>
+          <dt>Debt-to-income (DTI)</dt><dd>Monthly debt payments ÷ gross monthly income. Lenders often cap it around 36–43%.</dd>
+          <dt>Default</dt><dd>Failing to repay a loan as agreed.</dd>
+          <dt>Diversification</dt><dd>Spreading money across many investments so one failure can't sink you.</dd>
+          <dt>Dividend</dt><dd>A share of a company's profits paid to shareholders, usually quarterly.</dd>
+          <dt>Dollar-cost averaging</dt><dd>Investing a fixed amount on a regular schedule, regardless of price. It takes emotion out of timing.</dd>
+          <dt>Down payment</dt><dd>The part of a purchase price you pay in cash; the rest is borrowed.</dd>
+          <dt>Drawdown</dt><dd>A fall from a peak to a later low.</dd>
+          <dt>DSCR</dt><dd>Debt-service coverage ratio: net operating income ÷ loan payments.</dd>
+          <dt>Duration</dt><dd>How sensitive a bond's price is to interest-rate changes. Duration 6 ≈ −6% per +1 point in rates.</dd>
+          <dt>Early-withdrawal penalty</dt><dd>The interest a bank keeps if you cash out a CD before it matures — often 3 to 12 months' worth.</dd>
+          <dt>Emergency fund</dt><dd>Cash set aside for surprises — typically 3–6 months of expenses.</dd>
+          <dt>Equity</dt><dd>The part of an asset you truly own: its value minus what you owe on it. Also another word for stock.</dd>
+          <dt>FDIC insurance</dt><dd>U.S. government insurance on bank deposits, up to $250,000 per depositor, per bank, per ownership category.</dd>
+          <dt>Fear &amp; Greed index</dt><dd>A 0–100 gauge of investor mood. Low readings mean fear; high readings mean greed.</dd>
+          <dt>Financial independence (FI)</dt><dd>Having enough passive income or investments to cover your living costs without working.</dd>
+          <dt>FOMO</dt><dd>Fear of missing out — the urge to buy something because everyone else is and prices are rising.</dd>
+          <dt>4% rule</dt><dd>A rule of thumb: withdrawing 4% of your investments a year has historically lasted 30+ years. So you need ~25× your yearly spending.</dd>
+          <dt>Index fund</dt><dd>A low-cost fund that owns every company in a market index.</dd>
+          <dt>Inflation</dt><dd>The general rise in prices over time, which shrinks what each dollar buys.</dd>
+          <dt>Interest</dt><dd>The price of borrowing money — or the reward for lending it.</dd>
+          <dt>Inverted yield curve</dt><dd>When short-term rates are higher than long-term rates, usually because markets expect rates to fall.</dd>
+          <dt>Leverage</dt><dd>Using borrowed money to control a bigger asset, magnifying gains and losses.</dd>
+          <dt>Liability</dt><dd>Something you owe. For building freedom: something that takes money out of your pocket.</dd>
+          <dt>Liquidity</dt><dd>How quickly something can be turned into cash without losing value. Cash is most liquid; real estate and CDs less so.</dd>
+          <dt>Loss aversion</dt><dd>The tendency to feel losses about twice as strongly as equal gains, which can lead to panic selling.</dd>
+          <dt>LTV</dt><dd>Loan-to-value ratio: loan amount ÷ property value.</dd>
+          <dt>Margin call</dt><dd>A broker's demand for more collateral when a leveraged or short position moves against you.</dd>
+          <dt>Maturity</dt><dd>The date a CD, bond or loan ends and the principal is repaid.</dd>
+          <dt>Net worth</dt><dd>Everything you own minus everything you owe.</dd>
+          <dt>NOI</dt><dd>Net operating income: a property's rent minus its operating expenses, before any loan payments.</dd>
+          <dt>Passive income</dt><dd>Income that arrives without you working for it: rent, dividends, business profits, interest.</dd>
+          <dt>Principal</dt><dd>The amount borrowed or deposited, not counting interest.</dd>
+          <dt>Put option</dt><dd>The right to sell 100 shares at the strike price before expiry.</dd>
+          <dt>Recession</dt><dd>A broad decline in economic activity, usually with rising unemployment.</dd>
+          <dt>REIT</dt><dd>Real estate investment trust: a company that owns property and pays out most of its profits as dividends.</dd>
+          <dt>Rule of 72</dt><dd>72 ÷ yearly return ≈ years for money to double.</dd>
+          <dt>Savings rate</dt><dd>The share of your income you keep: cashflow ÷ income.</dd>
+          <dt>Short selling</dt><dd>Selling borrowed shares, hoping to buy them back cheaper later.</dd>
+          <dt>Standard deviation</dt><dd>A measure of how spread out returns are around their average — the usual way to express volatility.</dd>
+          <dt>Stock split</dt><dd>Turning each share into several cheaper ones. Your total value doesn't change.</dd>
+          <dt>Strike price</dt><dd>The price at which an option lets you buy (call) or sell (put).</dd>
+          <dt>Term</dt><dd>How long a CD, bond or loan lasts.</dd>
+          <dt>VIX</dt><dd>A measure of expected stock-market volatility, often called the market's "fear gauge".</dd>
+          <dt>Volatility</dt><dd>How much a price swings up and down.</dd>
+          <dt>Yield</dt><dd>Income from an investment as a percentage of its price.</dd>
+          <dt>Yield curve</dt><dd>A chart of interest rates by length of time. Normally upward-sloping; sometimes flat or inverted.</dd>
+        </dl>
+      </section>
+
+      <p class="muted small">All companies, banks and people in the game are fictional. Made for learning about money — not financial advice. <a class="back-top" href="#top" onclick="window.scrollTo(0,0);return false;">↑ Back to top</a></p>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const num = (id) => Number($(id).value) || 0;
+    const money = (n) => (n < 0 ? '−$' : '$') + Math.round(Math.abs(n)).toLocaleString('en-US');
+
+    // ---- debt payoff
+    function loanCalc() {
+      const bal = num('lc-bal'), apr = num('lc-apr'), pay = num('lc-pay');
+      const r = apr / 1200;
+      const out = $('lc-out');
+      if (bal <= 0) { out.textContent = 'Enter a balance.'; return; }
+      if (pay <= bal * r) { out.innerHTML = `A payment of ${money(pay)} doesn't even cover the first month's interest (${money(bal * r)}). <b style="color:var(--bad-text)">This debt would never be paid off.</b>`; return; }
+      let b = bal, months = 0, interest = 0;
+      while (b > 0.005 && months < 1200) { const i = b * r; interest += i; b = b + i - pay; months++; }
+      const yrs = Math.floor(months / 12), mo = months % 12;
+      out.innerHTML = `Paid off in <b>${months} months</b> (${yrs ? `${yrs} yr${yrs > 1 ? 's' : ''} ` : ''}${mo ? `${mo} mo` : ''}), paying <b>${money(interest)}</b> of interest on a ${money(bal)} balance.`
+        + (pay < bal ? ` Paying ${money(pay * 1.5)} a month instead would save about ${money(interest - (function () { let b2 = bal, t = 0, n = 0; while (b2 > 0.005 && n < 1200) { const i = b2 * r; t += i; b2 = b2 + i - pay * 1.5; n++; } return t; })())} of interest.` : '');
+    }
+
+    // ---- compound growth
+    function growthCalc() {
+      const start = num('gc-start'), monthly = num('gc-monthly'), rate = num('gc-rate'), years = Math.min(60, Math.max(1, Math.round(num('gc-years'))));
+      const r = Math.pow(1 + rate / 100, 1 / 12) - 1;
+      let v = start;
+      for (let m = 0; m < years * 12; m++) v = v * (1 + r) + monthly;
+      const put = start + monthly * years * 12;
+      $('gc-out').innerHTML = `After ${years} years you'd have about <b>${money(v)}</b>. You put in ${money(put)}; <b>${money(v - put)}</b> came from growth.`
+        + (rate > 0 ? ` (Rule of 72: money doubles about every ${(72 / rate).toFixed(1)} years at ${rate}%.)` : '');
+    }
+
+    // ---- CD
+    function penaltyMonths(term) { return term < 12 ? 3 : term <= 24 ? 6 : 12; }
+    function cdCalc() {
+      const dep = num('cd-dep'), apy = num('cd-apy'), term = Math.max(1, Math.round(num('cd-term')));
+      const earlyRaw = $('cd-early').value;
+      const r = Math.pow(1 + apy / 100, 1 / 12) - 1;
+      const out = $('cd-out');
+      const atMaturity = dep * Math.pow(1 + r, term);
+      let html = `Held to maturity (${term} months, compounding), ${money(dep)} grows to <b>${money(atMaturity)}</b> — ${money(atMaturity - dep)} of interest. With monthly payouts instead, it pays about ${money(dep * r)}/mo.`;
+      if (earlyRaw !== '') {
+        const k = Math.max(0, Math.min(term, Math.round(Number(earlyRaw))));
+        if (k < term) {
+          const value = dep * Math.pow(1 + r, k);
+          const pm = penaltyMonths(term);
+          const penalty = dep * r * pm;
+          const net = Math.max(0, value - penalty);
+          html += `<br>Cashing out after ${k} month${k === 1 ? '' : 's'}: worth ${money(value)}, minus a typical penalty of ${pm} months of interest (${money(penalty)}) = <b>${money(net)}</b>${net < dep ? ` — <span style="color:var(--bad-text)">less than you deposited</span>` : ''}.`;
+        }
+      }
+      out.innerHTML = html;
+    }
+
+    const calcs = [[['lc-bal', 'lc-apr', 'lc-pay'], loanCalc], [['gc-start', 'gc-monthly', 'gc-rate', 'gc-years'], growthCalc], [['cd-dep', 'cd-apy', 'cd-term', 'cd-early'], cdCalc]];
+    for (const [ids, fn] of calcs) { for (const id of ids) $(id).addEventListener('input', fn); fn(); }
+
+    // ---- search: filter the glossary and jump to the first matching section
+    const terms = Array.from(document.querySelectorAll('#glossary-list dt'));
+    $('guide-search').addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      let shown = 0;
+      for (const dt of terms) {
+        const dd = dt.nextElementSibling;
+        const hit = !q || dt.textContent.toLowerCase().includes(q) || dd.textContent.toLowerCase().includes(q);
+        dt.classList.toggle('hide', !hit); dd.classList.toggle('hide', !hit);
+        if (hit) shown++;
+      }
+      $('gl-empty').hidden = shown > 0;
+    });
+    $('guide-search').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const q = e.target.value.trim().toLowerCase();
+      if (!q) return;
+      const sec = Array.from(document.querySelectorAll('section.lesson-sec')).find((s) => s.id !== 'glossary' && s.querySelector('h2').textContent.toLowerCase().includes(q))
+        || Array.from(document.querySelectorAll('section.lesson-sec')).find((s) => s.id !== 'glossary' && s.textContent.toLowerCase().includes(q))
+        || $('glossary');
+      sec.scrollIntoView();
+    });
+
+    // ---- highlight the section you're reading in the contents
+    const links = Array.from(document.querySelectorAll('.toc a'));
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver((entries) => {
+        for (const en of entries) {
+          if (!en.isIntersecting) continue;
+          for (const a of links) a.classList.toggle('active', a.getAttribute('href') === `#${en.target.id}`);
+        }
+      }, { rootMargin: '-80px 0px -70% 0px' });
+      document.querySelectorAll('section.lesson-sec').forEach((s) => io.observe(s));
+    }
+  })();
+  </script>
+</body>
+</html>

@@ -7,7 +7,7 @@
   'use strict';
   if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
     require('./rng.js'); require('./data.js'); require('./core.js');
-    require('./market.js'); require('./options.js'); require('./deals.js'); require('./trade.js'); require('./events.js'); require('./ai.js');
+    require('./market.js'); require('./savings.js'); require('./options.js'); require('./deals.js'); require('./trade.js'); require('./events.js'); require('./ai.js');
   }
   const MMS = global.MMS || (global.MMS = {});
   const C = MMS.Core, D = MMS.Data, RNG = MMS.RNG;
@@ -62,6 +62,7 @@
     state.round = 0;
     for (const p of state.players) p.history.push(C.snapshot(state, p));
     state.round = 1;
+    MMS.Savings.refreshOffers(state);
     state.news = [{ text: '🏁 Month 1 begins. Prices update at the end of every month, after each player has had a turn.', tone: 'neutral', lesson: '' }];
     C.log(state, `A new game begins with ${players.length} player${players.length > 1 ? 's' : ''}.`, 'neutral');
     return state;
@@ -152,6 +153,7 @@
     const rng = RNG.makeRng(state);
     state.round++;
     const headlines = MMS.Market.update(state, rng);
+    MMS.Savings.refreshOffers(state);
     state.news = headlines;
     for (const h of headlines) C.log(state, h.text, h.tone);
     if (state.settings.timeLimit && state.round > state.settings.timeLimit) {
@@ -444,6 +446,19 @@
     return fail('Unknown asset.');
   }
 
+  // ------------------------------------------------------------------ certificates of deposit
+  /** Open a CD from this month's rate board. payout: 'monthly' (interest paid to you) or 'compound'. */
+  function openCD(state, offerId, amount, payout) {
+    const bad = requireTurn(state); if (bad) return bad;
+    return done(state, MMS.Savings.openCD(state, current(state), offerId, amount, payout));
+  }
+
+  /** Cash out a CD before it matures, paying the early-withdrawal penalty. */
+  function breakCD(state, cdId) {
+    const bad = requireTurn(state); if (bad) return bad;
+    return done(state, MMS.Savings.breakCD(state, current(state), cdId));
+  }
+
   // ------------------------------------------------------------------ options & short selling
   function buyOption(state, secId, kind, strike, months, contracts) {
     const bad = requireTurn(state); if (bad) return bad;
@@ -609,7 +624,14 @@
     }
     if (monthsCash > 12 && p.cash > 20000) {
       const bond = state.market.securities.tbnd;
-      add(5, '💤', `${C.money(p.cash)} of cash is sitting idle and earning nothing. The bond fund yields ~${(MMS.Market.currentYield(bond) * 100).toFixed(1)}%/yr, or keep some ready for the next good deal.`);
+      const cd = MMS.Savings.bestOffer(state, 12);
+      add(5, '💤', `${C.money(p.cash)} of cash is sitting idle and earning nothing. A 12-month CD pays ${cd ? cd.apy.toFixed(2) : '—'}% with no risk, the bond fund yields ~${(MMS.Market.currentYield(bond) * 100).toFixed(1)}%/yr — or keep some ready for the next good deal.`);
+    }
+    const mood = MMS.Market.sentimentMood(MMS.Market.sentiment(state));
+    if (sv > 5000 && mood.id === 'xgreed') {
+      add(5, '🤑', 'The market is in "extreme greed". Prices driven by euphoria tend to fade later — a good moment to check you\'re diversified, not to pile into whatever is hottest.');
+    } else if (sv > 2000 && mood.id === 'xfear') {
+      add(5, '😱', 'The market is in "extreme fear". Selling in a panic locks in losses; patient investors who keep buying quality investments when others are scared have historically done well.');
     }
     const smallest = p.debts.filter((d) => !d.revolving || d.balance > 0).sort((a, b) => a.balance - b.balance)[0];
     if (smallest && smallest.balance <= p.cash && smallest.balance > 0) {
@@ -647,6 +669,10 @@
       s.turn.homes = p ? MMS.Deals.homeListings(s, p, RNG.makeRng(s)) : [];
     }
     if (s.turn && s.turn.payday && !s.turn.payday.popups) s.turn.payday.popups = [];
+    const m = s.market;
+    if (m.sentiment == null) { m.sentiment = 50; m.froth = 0; }
+    if (!Array.isArray(m.sentimentHistory)) m.sentimentHistory = [];
+    for (const id in m.securities) if (m.securities[id].sent == null) m.securities[id].sent = MMS.Market.sentExposure(m.securities[id]);
     s.version = SAVE_VERSION;
     return s;
   }
@@ -655,7 +681,7 @@
     createGame, beginTurn, resolveCard, markSeen, canEndTurn, endTurn, claimFreedom, continueGame,
     isBot, humans, activeHumans, playBotTurn, runBots, finishGame,
     buyStock, sellStock, payDebt, payAssetLoan, borrow, sellAsset, downshift, downshiftInfo,
-    buyOption, sellOption, shortSell, coverShort, sellHome, buyHome, cancelClub, proposeTrade, answerTrade, MAX_BOT_OFFERS,
+    openCD, breakCD, buyOption, sellOption, shortSell, coverShort, sellHome, buyHome, cancelClub, proposeTrade, answerTrade, MAX_BOT_OFFERS,
     coachTips, standings, activePlayers, checkFreedom, serialize, deserialize, interestLeft
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS;

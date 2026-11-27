@@ -51,7 +51,7 @@ Each turn:
    - **Charity** — donate 10% of your monthly income for 3 turns of good karma (better deals, more good luck, fewer layoffs).
      If you've been laid off, it's still 10% of your usual salary.
    - **Buyer offers** for your properties and businesses, repairs, vacancies and expansion opportunities.
-3. **Act** — buy deals, trade stocks, options and short positions, pay down debt, borrow from the bank, sell assets,
+3. **Act** — buy deals, trade stocks, options and short positions, open CDs, pay down debt, borrow from the bank, sell assets,
    trade assets with other players, buy or sell the home you live in, or downshift your lifestyle.
 4. **End your turn** and pass the device. When everyone has played, the month ends and the market moves.
 
@@ -61,14 +61,14 @@ are instant, and your payday screen shows what each one did since your last turn
 
 | Level | Personality | How it plays |
 |---|---|---|
-| Easy | The Spender | Thin savings, luxuries on the credit card, chases hot tips and panic-sells, finances a big wedding, rarely buys deals. |
-| Normal | The Steady Saver | Buys deals with solid cashflow, pays off debt above 10% APR, keeps extra cash in an index fund. |
+| Easy | The Spender | Thin savings, luxuries on the credit card, chases hot tips and panic-sells (more in fearful markets, chasing more in greedy ones), finances a big wedding, rarely buys deals. |
+| Normal | The Steady Saver | Buys deals with solid cashflow, pays off debt above 10% APR, keeps extra cash in an index fund and 12-month CDs. |
 | Hard | The Investor | Pays off debt above 7% APR, sells stocks or borrows to fund strong deals, trims a pricey lifestyle, invests spare cash in dividend stocks. |
 
 In all-bot test games, Hard wins about two-thirds of three-way races against Normal and Easy. If every person
 has finished, you can let the bots race for the remaining places or end the game.
 
-**Winning:** passive income (dividends + rental cashflow + business profit + interest) ≥ 2× total monthly
+**Winning:** passive income (dividends + rental cashflow + business profit + interest, including CD interest paid out monthly) ≥ 2× total monthly
 expenses (living + children + debt payments). Paying off debt lowers your expenses *and* your target.
 After someone wins, the others can keep playing for 2nd, 3rd… Optional time limits (36/60/100 months) rank
 players by progress, and the freedom goal can be set to 1.5× or 3× for shorter or longer games.
@@ -94,6 +94,10 @@ players by progress, and the freedom goal can be set to 1.5× or 3× for shorter
   Loans on an asset go with it. People accept or decline on the shared device; bots answer instantly and only accept
   trades that leave them better off (3 offers per bot per turn).
 - **A bank** that lends as long as the payment fits your cashflow.
+- **CDs (certificates of deposit)**: in the Savings & CDs tab, three fictional banks (an online bank, a credit union and a
+  big branch bank) quote rates for 3-month to 5-year CDs, plus occasional higher-rate specials. Rates track the central bank
+  rate, change every month and follow a yield curve that slopes up when rates are low and inverts when they're high.
+  Take interest monthly (passive income) or let it compound; cashing out early costs 3–12 months of interest.
 - **Options & short selling**: calls, puts and straddles (1-, 3- and 6-month expiries, 100 shares per contract) priced with
   Black–Scholes from each stock's live volatility, with a bid/ask spread and a payoff chart; short sales with a 50% margin deposit,
   monthly borrow fees and dividends owed, and automatic margin calls.
@@ -110,9 +114,14 @@ players by progress, and the freedom goal can be set to 1.5× or 3× for shorter
   payback period and a verdict — each with a plain-English tooltip — plus how the deal would move your freedom meter.
 - **Debt tab**: interest charged this month, months to payoff, interest left to pay, avalanche vs. snowball,
   and how extra payments shorten a loan.
+- **Financials tab**: your personal income statement (every rental, business, dividend, note and CD; every expense,
+  with each debt payment split into interest and principal), balance sheet, key ratios (savings rate, debt-to-income,
+  housing cost, emergency fund) and income vs. expenses over time.
 - **Money coach**: tips based on *your* numbers (expensive debt, emergency fund, concentration risk, idle cash…).
-- **Learn tab**: 22 core ideas (compound growth, leverage, volatility, diversification, bonds and rates…)
-  with your own numbers plugged in.
+- **Learn tab**: 25 core ideas (compound growth, leverage, volatility, diversification, bonds and rates, CDs,
+  fear & greed, financial statements…) with your own numbers plugged in, each linking to the
+  **in-depth guide** (`learn.html`): step-by-step lessons, worked examples, debt/compound-growth/CD calculators
+  and a searchable glossary. It opens in a new tab so the game stays put.
 - **End-of-game report card**: interest paid, luxury spending, donations, passive income earned.
 
 ## How the market works
@@ -135,9 +144,15 @@ a market "fear gauge" that spikes in crashes and recessions, rare fat-tailed jum
 between boom, stable and recession, interest-rate moves, quarterly earnings seasons, dividend growth,
 stock splits, and calibration so news, earnings and jumps add up to each asset's target volatility.
 
+**Fear & Greed.** A 0–100 investor-mood index (top bar and Stocks tab) rises with prices and exciting news and falls
+after drops, crashes and scary headlines. Greed gives stocks an extra push up (crypto and speculative stocks most),
+calms volatility and makes bubbles and crashes more likely; fear pushes stocks down, sends money to bonds and gold, and
+makes swings bigger. Moves driven purely by mood unwind over the following months, so long-run returns are unchanged and,
+as in real markets, the year after extreme fear has tended to beat the year after extreme greed.
+
 ## Deploying it
 
-The game runs entirely in the browser; a server only has to hand out `index.html`, `css/` and `js/`.
+The game runs entirely in the browser; a server only has to hand out `index.html`, `learn.html`, `css/` and `js/`.
 `wsgi.py` is a standard [WSGI](https://peps.python.org/pep-3333/) app for doing that from any Python host.
 It uses only the Python standard library, and it serves nothing else (not the server code, tests, or `.git`).
 Each player's saved game stays in their own browser, so the server keeps no data and needs no database.
@@ -160,11 +175,13 @@ Each player's saved game stays in their own browser, so the server keeps no data
 
 ```
 index.html          the page (plain <script> tags, so it works straight from disk)
+learn.html          the in-depth money guide (lessons, calculators, glossary), linked from the Learn tab
 css/styles.css      styles (dark theme, colorblind-safe player colors)
 js/rng.js           seeded random numbers (same seed → same game)
 js/data.js          jobs, lifestyles, securities, news, events and deal templates
-js/core.js          finance math, player generation, income/expenses, payday
-js/market.js        stock market, economy cycle, interest rates, statistics
+js/core.js          finance math, player generation, income/expenses, financial statement, payday
+js/market.js        stock market, economy cycle, interest rates, Fear & Greed mood, statistics
+js/savings.js       CDs: monthly rate board, opening, interest, maturity, early-withdrawal penalties
 js/options.js       options pricing (Black–Scholes), option & short positions, settlement, margin calls
 js/deals.js         deal generation, buying/selling, deal analysis, buying/selling your own home
 js/trade.js         trades between players: valuing, checking and carrying out offers

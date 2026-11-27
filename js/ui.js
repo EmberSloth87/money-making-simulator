@@ -4,7 +4,7 @@
  */
 (function () {
   'use strict';
-  const { Engine: E, Core: C, Data: D, Market: M, Deals, Options: O, AI, Trade: T } = window.MMS;
+  const { Engine: E, Core: C, Data: D, Market: M, Deals, Options: O, AI, Trade: T, Savings: SV } = window.MMS;
   const SAVE_KEY = 'mms.save.v1';
   const SETUP_KEY = 'mms.setup.v1';
   const $app = document.getElementById('app');
@@ -24,6 +24,7 @@
     logFilter: 'all',
     expand: {},
     opt: { sec: 'idx', kind: 'call', strike: 2, months: 3, contracts: 1 },
+    cd: { id: 'online-12', payout: 'monthly', amount: '' },
     trade: null,    // the trade being put together in the Trade tab (see tradeDraft)
     botRecap: [],   // recent computer turns, each tagged with a sequence number
     recapSeen: {},  // person id → last recap sequence they've seen
@@ -306,7 +307,7 @@
   });
 
   // Allocation bar (100% stacked, fixed color per category).
-  const ALLOC_COLORS = { cash: D.COLORS[0], stocks: D.COLORS[1], realestate: D.COLORS[2], business: D.COLORS[3], notes: D.COLORS[4], collect: D.COLORS[5], home: D.COLORS[6], options: D.COLORS[7] };
+  const ALLOC_COLORS = { cash: D.COLORS[0], stocks: D.COLORS[1], realestate: D.COLORS[2], business: D.COLORS[3], notes: D.COLORS[4], collect: D.COLORS[5], home: D.COLORS[6], options: D.COLORS[7], cds: '#5fb3c4' };
   function allocationBar(parts) {
     const total = parts.reduce((a, p) => a + Math.max(0, p.value), 0);
     if (total <= 0) return '';
@@ -394,11 +395,23 @@
 
   // ================================================================ game screen
   function econInfo() { return M.ECON_LABELS[S.market.economy]; }
+  /** The volatility gauge ("VIX"): how wild price swings are right now. */
   function mood(fear) {
     if (fear < 0.95) return { icon: '😌', label: 'Calm' };
     if (fear < 1.15) return { icon: '🙂', label: 'Normal' };
-    if (fear < 1.5) return { icon: '😟', label: 'Nervous' };
-    return { icon: '😱', label: 'Panicked' };
+    if (fear < 1.5) return { icon: '😟', label: 'Jumpy' };
+    return { icon: '🌪️', label: 'Wild' };
+  }
+  /** The Fear & Greed index: what mood investors are in (0 = extreme fear, 100 = extreme greed). */
+  function fng() {
+    const v = M.sentiment(S);
+    return Object.assign({ value: Math.round(v) }, M.sentimentMood(v));
+  }
+  function fngGauge(v) {
+    const labels = ['Extreme fear', 'Fear', 'Neutral', 'Greed', 'Extreme greed'];
+    return `<div class="fng-gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(v)}" aria-label="Fear and Greed index">
+      <div class="fng-bar"><span class="fng-needle" style="left:${Math.max(0, Math.min(100, v)).toFixed(1)}%"><b>${Math.round(v)}</b></span></div>
+      <div class="fng-labels">${labels.map((l) => `<span>${l}</span>`).join('')}</div></div>`;
   }
 
   /** Whose board to show: the current player during a turn, otherwise the last person who played. */
@@ -412,13 +425,15 @@
     const p = viewPlayer();
     const s = C.summarize(S, p);
     const econ = econInfo();
-    const md = mood(S.market.fear);
+    const fg = fng();
     const open = S.turn ? S.turn.cards.filter((c) => !c.resolved).length : 0;
     const tabs = [
       ['month', '📬 This Month', open],
       ['market', '📈 Stocks'],
       ['options', '🎯 Options & Shorts'],
+      ['savings', '🏦 Savings & CDs'],
       ['portfolio', '🏠 Portfolio'],
+      ['financials', '🧾 Financials'],
       ...(S.players.length > 1 ? [['trade', '🤝 Trade']] : []),
       ['debt', '💳 Debt & Budget'],
       ['standings', '🏆 Standings'],
@@ -432,7 +447,7 @@
         <span class="pill">📅 Month ${S.round}${S.settings.timeLimit ? ` of ${S.settings.timeLimit}` : ''}</span>
         <span class="pill tone-${econ.tone}" data-tip="${esc(econ.desc)}">${econ.icon} Economy: ${econ.label}</span>
         <span class="pill" data-tip="The central bank's interest rate. It drives mortgage rates, bank-loan rates and bond prices.">🏦 Rate ${S.market.rate.toFixed(2)}%</span>
-        <span class="pill" data-tip="The market's fear gauge. When investors are nervous, every stock swings harder.">${md.icon} Market mood: ${md.label}</span>
+        <span class="pill tone-${fg.tone}" data-tip="${esc(`Fear & Greed index: ${fg.value} out of 100 (0 = extreme fear, 100 = extreme greed). ${fg.desc}`)}">${fg.icon} Fear &amp; Greed: ${fg.value} · ${fg.label}</span>
       </div>
       <div class="topactions">
         <button class="btn ghost sm" data-action="open-rules">📖 Rules</button>
@@ -548,7 +563,9 @@
     switch (ui.tab) {
       case 'market': return renderMarket(p, s);
       case 'options': return renderOptions(p, s);
+      case 'savings': return renderSavings(p, s);
       case 'portfolio': return renderPortfolio(p, s);
+      case 'financials': return renderFinancials(p, s);
       case 'trade': return S.players.length > 1 ? renderTrade(p) : renderMonth(p, s);
       case 'debt': return renderDebt(p, s);
       case 'standings': return renderStandings();
@@ -729,21 +746,52 @@
       </tr>`;
     }).join('');
     const md = mood(m.fear);
+    const fngNow = fng();
     return `<div class="card">
       <div class="card-head"><h3>📈 Stock market</h3><div class="muted small">Cash: <b>${money(p.cash)}</b> · Stocks: <b>${money(s.stocksValue)}</b> · Dividends: <b>${money(s.dividends)}/mo</b></div></div>
-      <p class="muted small">Prices update once a month, after every player has had a turn — so this month's prices are the same for everyone. Click any investment for its full chart and risk statistics. ${md.icon} Market mood is <b>${md.label.toLowerCase()}</b>.</p>
+      <p class="muted small">Prices update once a month, after every player has had a turn — so this month's prices are the same for everyone. Click any investment for its full chart and risk statistics. ${md.icon} Volatility right now: <b>${md.label.toLowerCase()}</b> · ${fngNow.icon} Investor mood: <b>${esc(fngNow.label.toLowerCase())}</b> (Fear &amp; Greed ${fngNow.value}).</p>
       <div class="table-wrap"><table class="data market">
         <thead><tr><th>Investment</th><th class="num">Price</th><th class="num">1 mo ${tip('Price change since last month.')}</th><th class="num">1 yr ${tip('Price change over the last 12 months — the longer-term trend. (Dividends are paid on top.)')}</th><th>1-year trend</th><th>Risk ${tip('Based on volatility: how much the price typically swings. More dots = bigger swings, both up and down.')}</th><th class="num">Dividend ${tip('Dividend yield: yearly dividends ÷ price. Paid to you every payday as passive income.')}</th><th class="num">You own</th><th>Trade</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
     </div>
+    ${renderFearGreed()}
     <div class="card learn-inline"><h3>🎓 Reading the market</h3>
       <ul class="tips">
         <li><span>🎢</span><span><b>Volatility differs a lot.</b> The bond fund rarely moves more than a percent or two a month; Kryptonix can move 30%+. Higher volatility means bigger potential gains <em>and</em> losses.</span></li>
         <li><span>🧺</span><span><b>Diversify.</b> One company can crash on bad news, but an index fund of 500 companies rarely moves more than a few percent. Gold and bonds often rise when stocks fall.</span></li>
         <li><span>🔄</span><span><b>The economy matters.</b> In recessions, cyclical stocks (EVs, AI, penny stocks) fall hardest while groceries, healthcare, bonds and gold hold up.</span></li>
         <li><span>🏛️</span><span><b>Interest rates move bonds.</b> When rates rise, bond and REIT prices fall — and their payouts slowly rise.</span></li>
+        <li><span>😨</span><span><b>Mood swings move prices.</b> Fear and greed push prices further than the news alone would — and those mood-driven moves tend to fade. "Be fearful when others are greedy, and greedy when others are fearful."</span></li>
         <li><span>💸</span><span><b>Growth vs. income.</b> Most stocks pay little or no dividend, so they won't help your freedom meter until you sell them and buy income-producing assets.</span></li>
       </ul></div>`;
+  }
+
+  function renderFearGreed() {
+    const m = S.market;
+    const f = fng();
+    const hist = m.sentimentHistory || [];
+    const ago = (k) => (hist.length > k ? hist[hist.length - 1 - k] : null);
+    const moodAt = (v) => (v == null ? '—' : `${v} · ${M.sentimentMood(v).label}`);
+    const values = hist.slice(-36).map((y, i, a) => ({ x: i - (a.length - 1), y }));
+    const chart = values.length > 2 ? lineChart('fng', [{ name: 'Fear & Greed', color: D.COLORS[3], values }], {
+      label: 'Fear and Greed index over the last three years', height: 170, yFmt: (v) => String(Math.round(v)),
+      xFmt: (x) => (x === 0 ? 'now' : `${x} mo`), ref: { y: 50, label: 'neutral' }
+    }) : '';
+    const effects = {
+      xfear: 'Stocks are being pushed below where the news alone would put them, bonds and gold are being bid up, and swings are bigger. Panic-driven drops have tended to bounce back over the following months.',
+      fear: 'Stocks lean lower and safe havens lean higher. Swings are a bit bigger than usual.',
+      neutral: 'Mood isn\'t adding much push either way.',
+      greed: 'Stocks — especially crypto, AI and other speculative names — lean higher, and the market feels calm.',
+      xgreed: 'Prices are being pushed above where the news alone would put them, and the market feels calm. Mood-driven gains tend to fade, and bubbles and crashes get more likely.'
+    }[f.id];
+    return `<div class="card fng-card"><div class="card-head"><h3>${f.icon} Fear &amp; Greed index ${tip('A 0–100 measure of investor mood, like the real-world Fear & Greed index. It rises when prices climb and news is exciting, and falls after drops, crashes and scary headlines.')}</h3>
+        <span class="pill tone-${f.tone}"><b>${f.value}</b> · ${esc(f.label)}</span></div>
+      <div class="grid-2 fng-grid"><div>${fngGauge(f.value)}
+        <p class="small">${esc(f.desc)}</p>
+        <p class="small muted"><b>What it does in the game:</b> ${esc(effects)}</p>
+        <div class="kv-grid">${kv('A month ago', moodAt(ago(1)))}${kv('A year ago', moodAt(ago(12)))}${kv('Volatility gauge', `${mood(m.fear).icon} ${mood(m.fear).label}`, '', 'How wild price swings are right now (like the VIX). Fear makes it jumpier; greed calms it.')}</div></div>
+        <div>${chart}</div></div>
+      <div class="lesson">💡 <b>Fear and greed are contagious.</b> When prices rise, people pile in so they don't miss out (FOMO), pushing prices higher still; when prices fall, they panic and sell. Those mood-driven moves usually reverse, so buying in a panic and staying cautious in a euphoria has worked better than following the crowd.</div></div>`;
   }
 
   function stockDetail(id) {
@@ -904,6 +952,80 @@
         </ul></div>`;
   }
 
+  // ---------------------------------------------------------------- Savings & CDs
+  function cdOrderTicket(p, o) {
+    if (!o) return '<p class="muted">Pick a rate from the board above.</p>';
+    const bank = SV.bankOf(o.bank);
+    const amount = Number(ui.cd.amount) || 0;
+    const proj = SV.project(o, amount, ui.cd.payout);
+    const pen = SV.penaltyMonths(o.term);
+    const radio = (id, label, help) => `<label class="opt check"><input type="radio" name="cd-payout" data-cd="payout" value="${id}" ${ui.cd.payout === id ? 'checked' : ''}> <span>${label} ${tip(help)}</span></label>`;
+    return `<div class="cd-ticket">
+      <div class="kv-grid">${kv('Bank', `${bank.icon} ${esc(bank.name)}`)}${kv('Term', SV.termLabel(o.term))}${kv('APY', `${o.apy.toFixed(2)}%`, 'pos', 'Annual percentage yield: what you earn in a year, including interest on interest (compounding).')}${kv('Minimum deposit', money(o.min))}
+        ${kv('Early-withdrawal penalty', `${pen} months of interest`, '', 'Cash out before the CD matures and the bank keeps this much interest — it can even eat into your deposit if you break the CD very early.')}</div>
+      <p class="small muted">${esc(bank.desc)}${o.promo ? ' This is a limited-time special with a higher rate and a bigger minimum.' : ''}</p>
+      ${radio('monthly', 'Pay me the interest every month', 'The interest lands in your cash each payday. It counts as passive income, so it moves your freedom meter.')}
+      ${radio('compound', 'Let the interest compound', 'Interest stays in the CD and earns interest of its own, so you end up with a little more — but you see none of it until the CD matures, so it does not count as passive income along the way.')}
+      ${S.phase === 'turn' && !p.finished ? `<div class="trade-row"><input type="number" min="${o.min}" step="100" class="qty wide" id="cd-amt" data-cd="amount" placeholder="Amount (min ${money(o.min)})" aria-label="Amount to deposit" value="${esc(ui.cd.amount)}">
+        <button class="btn ghost sm" data-action="cd-max" data-tip="Fill in all your cash">All cash</button>
+        <button class="btn primary" data-action="open-cd">Open CD</button></div>` : ''}
+      <div class="kv-grid cd-proj">
+        ${kv('Interest paid to you', `<span id="cd-proj-monthly">${money(proj.monthly)}</span>/mo`)}
+        ${kv(`Back to you in ${SV.termLabel(o.term)}`, `<span id="cd-proj-maturity">${money(proj.atMaturity)}</span>`)}
+        ${kv('Total interest', `<span id="cd-proj-interest">${money(proj.interest)}</span>`, 'pos')}</div>
+    </div>`;
+  }
+
+  function renderSavings(p, s) {
+    const offers = SV.offers(S);
+    const sel = offers.find((o) => o.id === ui.cd.id) || offers.find((o) => o.id === 'online-12') || offers[0];
+    ui.cd.id = sel.id;
+    const regular = offers.filter((o) => !o.promo);
+    const promo = offers.filter((o) => o.promo);
+    const cell = (o) => {
+      if (!o) return '<td class="num muted">—</td>';
+      const rowBest = Math.max(...offers.filter((x) => x.term === o.term).map((x) => x.apy));
+      return `<td class="num"><button class="cd-cell ${o.id === sel.id ? 'sel' : ''} ${o.apy === rowBest ? 'best' : ''}" data-action="cd-pick" data-id="${o.id}" aria-pressed="${o.id === sel.id}">${o.apy.toFixed(2)}%</button></td>`;
+    };
+    const rows = SV.TERMS.map((t) => `<tr><td><b>${SV.termLabel(t)}</b></td>${SV.BANKS.map((b) => cell(regular.find((o) => o.term === t && o.bank === b.id))).join('')}</tr>`).join('')
+      + promo.map((o) => `<tr class="promo"><td><b>⭐ ${SV.termLabel(o.term)} special</b><br><span class="muted small">min ${money(o.min)}</span></td>${SV.BANKS.map((b) => (b.id === o.bank ? cell(o) : '<td></td>')).join('')}</tr>`).join('');
+    const curve = lineChart('cd-curve', SV.BANKS.map((b, i) => ({
+      name: b.short, color: D.COLORS[[0, 2, 1][i]],
+      // Evenly spaced terms (3 mo … 5 yrs) so the short end is readable.
+      values: SV.TERMS.map((t, i) => ({ x: i, y: (regular.find((o) => o.term === t && o.bank === b.id) || {}).apy })).filter((v) => v.y != null)
+    })), { label: 'CD rates by term (the yield curve)', height: 220, yFmt: (v) => `${v.toFixed(1)}%`, xFmt: (x) => { const t = SV.TERMS[x]; return t == null ? '' : t < 12 ? `${t} mo` : `${t / 12} yr`; } });
+    const slope = SV.curveSlope(S);
+    const curveNote = slope > 0.3 ? 'The curve slopes <b>up</b>: longer CDs pay more, the normal reward for locking money up longer.'
+      : slope < -0.15 ? 'The curve is <b>inverted</b>: short CDs pay more than long ones. Banks expect rates to fall, so they won\'t promise today\'s high rate for years. Locking in a long CD now protects you if rates do fall.'
+      : 'The curve is fairly <b>flat</b>: long CDs pay about the same as short ones, so there\'s little reward for locking money up longer.';
+    const mine = (p.cds || []).map((cd) => {
+      const w = SV.earlyWithdrawal(cd);
+      const monthly = SV.cdMonthlyInterest(cd);
+      return `<tr><td><b>${esc(cd.icon)} ${SV.termAdj(cd.term)} CD</b>${cd.promo ? ' ⭐' : ''}<br><span class="muted small">${esc(cd.bankName)} · opened month ${cd.openedRound}</span></td>
+        <td class="num">${cd.apy.toFixed(2)}%</td><td class="num">${money(cd.principal)}</td>
+        <td class="num">${cd.payout === 'monthly' ? `<span class="pos">+${money(monthly)}/mo</span><br><span class="muted small">paid to you</span>` : `+${money(monthly)}/mo<br><span class="muted small">compounding · ${money(cd.accrued)} so far</span>`}</td>
+        <td class="num"><b>${money(SV.cdValue(cd))}</b></td><td>${plural(cd.monthsLeft, 'month')}<br><span class="muted small">then ${money(SV.maturityValue(cd))}</span></td>
+        <td>${S.phase === 'turn' && !p.finished ? `<button class="btn sm" data-action="break-cd" data-id="${cd.id}" data-tip="${esc(`Early-withdrawal penalty: ${w.months} months of interest (${money(w.penalty)})`)}">Cash out early · ${money(w.net)}</button>` : ''}</td></tr>`;
+    }).join('');
+    const best12 = SV.bestOffer(S, 12);
+    return `<div class="card"><div class="card-head"><h3>🏦 Certificates of deposit (CDs)</h3>
+        <div class="muted small">Cash: <b>${money(p.cash)}</b> · In CDs: <b>${money(s.cdValue)}</b> · CD interest: <b>${money(s.cdInterest)}/mo</b></div></div>
+      <p class="muted small">A CD is a savings deal with a bank: you leave money with it for a set term and it pays a fixed rate, guaranteed. Rates follow the central bank rate (now <b>${S.market.rate.toFixed(2)}%</b>), change every month, and differ a lot from bank to bank. Pick a rate to see the details.</p>
+      <div class="table-wrap"><table class="data cd-board"><thead><tr><th>Term</th>${SV.BANKS.map((b) => `<th class="num"><span data-tip="${esc(b.desc)}">${b.icon} ${esc(b.short)}</span></th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+      <h4>Open a CD</h4>${cdOrderTicket(p, sel)}
+    </div>
+    ${mine ? `<div class="card"><h3>📄 Your CDs</h3><div class="table-wrap"><table class="data"><thead><tr><th>CD</th><th class="num">APY</th><th class="num">Deposit</th><th class="num">Interest</th><th class="num">Worth now</th><th>Matures in</th><th></th></tr></thead><tbody>${mine}</tbody></table></div>
+      <p class="muted small">When a CD matures, your money (plus any interest that compounded) goes back into your cash at payday.</p></div>` : ''}
+    <div class="grid-2"><div class="card"><h3>📈 The yield curve ${tip('A chart of interest rates by how long you lock your money up. Its shape tells you what banks expect interest rates to do next.')}</h3>${curve}<p class="small">${curveNote}</p></div>
+      <div class="card learn-inline"><h3>🎓 CDs in a nutshell</h3><ul class="tips">
+        <li><span>🛡️</span><span><b>Safe.</b> Bank deposits are government-insured (up to $250,000 per bank in the U.S.), and the rate is locked in. You can't lose money — unless you cash out early.</span></li>
+        <li><span>🔒</span><span><b>Not liquid.</b> Breaking a CD costs months of interest, so keep your emergency fund somewhere you can reach it.</span></li>
+        <li><span>⚖️</span><span><b>Safe means modest.</b> ${best12 ? `The best 12-month CD pays ${best12.apy.toFixed(2)}%` : 'CDs pay modest rates'}: $10,000 earns about ${best12 ? money(10000 * SV.monthlyRate(best12.apy)) : '—'}/mo. Rentals and businesses can pay far more — with far more risk.</span></li>
+        <li><span>🪜</span><span><b>Build a ladder.</b> Split your savings across CDs that mature at different times (3, 6, 12, 24 months…). Some money frees up often, and you still capture longer-term rates.</span></li>
+        <li><span>🛍️</span><span><b>Shop around.</b> Big branch banks often pay a fraction of what online banks and credit unions pay for the exact same safety.</span></li>
+      </ul><p class="small"><a href="learn.html#cds" target="_blank" rel="noopener">Read more about CDs, APY and laddering →</a></p></div></div>`;
+  }
+
   // ---------------------------------------------------------------- Portfolio
   function renderPortfolio(p, s) {
     const canAct = S.phase === 'turn' && !p.finished;
@@ -932,9 +1054,10 @@
       <td>${canAct ? `<button class="btn sm" data-action="sell-asset" data-kind="note" data-id="${n.id}">Sell · ${money(n.principal * 0.95)}</button>` : ''}</td></tr>`).join('');
     const coll = p.collectibles.map((c) => `<tr><td><b>${esc(c.icon)} ${esc(c.name)}</b></td><td class="num">${money(c.cost)}</td><td class="num ${toneOf(c.value - c.cost)}">${money(c.value)}</td><td class="num">${c.upkeep ? `−${money(c.upkeep)}` : '—'}</td>
       <td>${canAct ? `<button class="btn sm" data-action="sell-asset" data-kind="collectible" data-id="${c.id}">Auction · ${money(c.value * 0.9)}</button>` : ''}</td></tr>`).join('');
-    const empty = !props && !bizs && !startups && !notes && !coll;
+    const empty = !props && !bizs && !startups && !notes && !coll && !(p.cds || []).length;
     const alloc = allocationBar([
       { label: 'Cash', value: Math.max(0, p.cash), color: ALLOC_COLORS.cash },
+      { label: 'CDs', value: s.cdValue, color: ALLOC_COLORS.cds },
       { label: 'Stocks', value: s.stocksValue, color: ALLOC_COLORS.stocks },
       { label: 'Real estate equity', value: s.propValue - s.propDebt, color: ALLOC_COLORS.realestate },
       { label: 'Businesses', value: s.bizValue - s.bizDebt, color: ALLOC_COLORS.business },
@@ -954,7 +1077,134 @@
       ${table('🏪 Businesses & side projects', ['Business', 'Status', 'Profit', 'Loan', 'Cashflow', 'Value ' + tip('Roughly 2.5 years of profit for businesses (1.5 for side projects).'), ''], bizs)}
       ${table('🚀 Startup investments', ['Company', 'Invested', 'Outcome in', ''], startups)}
       ${table('📜 Lending notes', ['Note', 'Principal', 'Rate', 'Interest', 'Matures in', ''], notes)}
-      ${table('💎 Collectibles', ['Item', 'Paid', 'Est. value', 'Upkeep', ''], coll)}`;
+      ${table('💎 Collectibles', ['Item', 'Paid', 'Est. value', 'Upkeep', ''], coll)}
+      ${(p.cds || []).length ? `<div class="card"><h3>🏦 CDs</h3><p>You have ${plural(p.cds.length, 'CD')} worth <b>${money(s.cdValue)}</b>, paying <b>${money(s.cdInterest)}/mo</b> in interest. <button class="btn sm ghost" data-action="tab" data-tab="savings">Manage in Savings &amp; CDs →</button></p></div>` : ''}
+      <p class="small muted">Want every dollar in and out on one page? See the <button class="linkish" data-action="tab" data-tab="financials">🧾 Financials</button> tab.</p>`;
+  }
+
+  // ---------------------------------------------------------------- Financials
+  /** One group of an income statement: a header row with its total, then each item. */
+  function stmtGroup(g, sign, key) {
+    const open = ui.expand[`fs-${key}`] !== false; // groups start open
+    const items = g.items.map((it) => `<div class="frow sub"><span>${esc(it.label)}${it.detail ? `<br><span class="muted small">${esc(it.detail)}</span>` : ''}</span><span class="num ${sign < 0 ? '' : toneOf(it.amount)}">${sign < 0 ? (it.amount < 0 ? `−${money(-it.amount)}` : money(it.amount)) : signed(it.amount)}</span></div>`).join('');
+    return `<button class="frow toggle" data-action="toggle-fs" data-key="fs-${key}" aria-expanded="${open}"><span>${open ? '▾' : '▸'} ${esc(g.label)}</span><span class="num ${sign < 0 ? '' : toneOf(g.total)}"><b>${sign < 0 ? money(g.total) : signed(g.total)}</b></span></button>
+      ${open ? `<div class="sub-rows">${items}</div>` : ''}`;
+  }
+
+  function renderFinancials(p, s) {
+    const st = C.statement(S, p);
+    const t = st.totals;
+    const income = Math.max(0, s.income);
+    const savingsRate = income > 0 ? s.cashflow / income : 0;
+    const coverage = s.expenses > 0 ? s.passive / s.expenses : 0;
+    const homeLoan = C.homeMortgage(p);
+    const housingCost = p.expenses.housing + (homeLoan ? homeLoan.payment : 0) - (C.isMarried(p) ? Math.round((p.expenses.housing + (homeLoan ? homeLoan.payment : 0)) / 2) : 0);
+    const gross = s.salary + s.gigs + Math.max(0, s.passive);
+    const dti = gross > 0 ? s.debt / gross : 0;
+    const months = s.expenses > 0 ? p.cash / s.expenses : 0;
+    const metric = (label, value, cls, help) => `<div class="metric ${cls || ''}"><span>${label}${help ? ' ' + tip(help) : ''}</span><b>${value}</b></div>`;
+
+    // Where the money comes from / goes (bars).
+    const incomeParts = [
+      { label: 'Salary', value: s.salary, color: D.COLORS[0] },
+      { label: 'Side gigs', value: s.gigs, color: D.COLORS[6] },
+      { label: 'Real estate', value: s.realEstate, color: D.COLORS[2] },
+      { label: 'Businesses & side projects', value: s.business + s.side, color: D.COLORS[3] },
+      { label: 'Dividends', value: s.dividends, color: D.COLORS[1] },
+      { label: 'Interest (notes & CDs)', value: s.interest + s.cdInterest, color: D.COLORS[4] }
+    ];
+    const half = C.isMarried(p) ? 0.5 : 1; // a spouse pays half of living costs and the home mortgage
+    const ex = (id) => (p.expenses[id] || 0) * half;
+    const debtInterest = t.debtInterest, debtPrincipal = t.debtPrincipal;
+    // Your share of debt payments: a spouse pays half of the home mortgage.
+    const debtItems = (st.expenses.find((g) => g.id === 'debt') || { items: [] }).items;
+    const shareOf = (it) => (it.type === 'mortgage' ? half : 1);
+    const myInterest = debtItems.reduce((a, it) => a + it.interest * shareOf(it), 0);
+    const myPrincipal = debtItems.reduce((a, it) => a + it.principal * shareOf(it), 0);
+    const expenseParts = [
+      { label: 'Housing', value: ex('housing'), color: D.COLORS[0] },
+      { label: 'Food', value: ex('food'), color: D.COLORS[1] },
+      { label: 'Transportation', value: ex('transport'), color: D.COLORS[2] },
+      { label: 'Utilities & insurance', value: ex('utilities') + ex('insurance'), color: D.COLORS[6] },
+      { label: 'Fun & shopping', value: ex('fun') + ex('misc'), color: D.COLORS[4] },
+      { label: 'Children, dating & clubs', value: s.children + s.dating + s.dues, color: D.COLORS[5] },
+      { label: 'Debt interest', value: myInterest, color: D.COLORS[7] },
+      { label: 'Debt principal', value: myPrincipal, color: D.COLORS[3] }
+    ];
+
+    const assets = st.assets.map((a) => row(esc(a.label), money(a.amount), 'sub')).join('');
+    const liabs = st.liabilities.length ? st.liabilities.map((l) => row(esc(l.label), money(l.amount), 'sub')).join('') : '<div class="frow sub muted"><span>Nothing owed 🎉</span></div>';
+
+    // Income, expenses and passive income over time (from the end-of-turn snapshots).
+    const hist = p.history.filter((h) => h.round > 0);
+    const series = [
+      { name: 'Total income', color: D.COLORS[0], values: hist.filter((h) => h.income != null).map((h) => ({ x: h.round, y: h.income })) },
+      { name: 'Expenses', color: D.COLORS[7], values: hist.filter((h) => h.expenses != null).map((h) => ({ x: h.round, y: h.expenses })) },
+      { name: 'Passive income', color: D.COLORS[2], values: hist.map((h) => ({ x: h.round, y: h.passive })) }
+    ].filter((x) => x.values.length);
+    const chart = hist.length >= 2 ? lineChart('fin-history', series, { label: 'Monthly income, expenses and passive income over time', height: 220, xFmt: (x) => `Month ${x}`, zero: true })
+      : '<p class="muted">Play a couple of months to see your income and expenses over time.</p>';
+
+    const st2 = p.stats;
+    const life = [
+      ['Passive income collected', money(st2.passiveEarned), 'pos'],
+      ['CD interest earned', money(st2.cdInterest || 0), 'pos'],
+      ['Gains from selling investments', signed(st2.realizedGains), toneOf(st2.realizedGains)],
+      ['Interest paid on personal debts', money(st2.interestPaid), 'neg'],
+      ['Spent on luxuries', money(st2.luxurySpent), st2.luxurySpent ? 'neg' : ''],
+      ['Donated to charity', money(st2.donated)],
+      ...(st2.cdPenalties ? [['CD early-withdrawal penalties', money(st2.cdPenalties), 'neg']] : []),
+      ...(st2.weddingSpent ? [['Spent on the wedding', money(st2.weddingSpent)]] : []),
+      ...(st2.datingSpent ? [['Spent on dates', money(st2.datingSpent)]] : []),
+      ...(st2.networkingSpent ? [['Spent on networking', money(st2.networkingSpent)]] : [])
+    ];
+
+    return `<div class="card"><div class="card-head"><h3>🧾 Financial statements</h3><span class="muted small">${esc(p.emoji)} ${esc(p.name)} · month ${S.round} · monthly figures at today's prices</span></div>
+        <p class="muted small">Businesses track their money with an <b>income statement</b> (what comes in and goes out each month) and a <b>balance sheet</b> (what you own and owe right now). Here are yours.</p>
+        <div class="metrics">
+          ${metric('Total income', `${money(s.income)}/mo`)}
+          ${metric('Total expenses', `${money(s.expenses)}/mo`)}
+          ${metric('Net cashflow', `${signed(s.cashflow)}/mo`, s.cashflow >= 0 ? 'good' : 'bad', 'Income minus expenses: what is left each month to invest or pay down debt.')}
+          ${metric('Savings rate', pct(savingsRate, 0), savingsRate >= 0.2 ? 'good' : savingsRate < 0 ? 'bad' : '', 'Cashflow ÷ income. Saving 20% or more of what you earn is a strong habit; people who retire early often save 40–70%.')}
+          ${metric('Passive covers', `${pct(coverage, 0)} of expenses`, coverage >= 1 ? 'good' : '', `Passive income ÷ expenses. At 100% your investments pay all your bills; this game asks for ${pct(mult(), 0)}.`)}
+          ${metric('Debt-to-income', pct(dti, 0), dti > 0.43 ? 'bad' : dti <= 0.2 ? 'good' : '', 'Debt payments ÷ gross income. Lenders get nervous above about 36–43%.')}
+          ${metric('Housing cost', gross > 0 ? `${pct(housingCost / gross, 0)} of income` : '—', gross > 0 && housingCost / gross > 0.35 ? 'bad' : '', 'Rent (or mortgage + upkeep) ÷ income. A common guideline is to keep housing under about 28–30%.')}
+          ${metric('Emergency fund', `${months.toFixed(1)} months`, months >= 3 ? 'good' : 'bad', 'Cash ÷ monthly expenses. Aim for 3–6 months. (CDs are close behind, but cost a penalty to break early.)')}
+        </div></div>
+      <div class="grid-2 fin-grid">
+        <div class="card statement-card"><h3>📥 Income statement — money in</h3>
+          <div class="fsec">Earned income (you work for it)</div>
+          ${st.earned.map((g, i) => stmtGroup(g, 1, `earned-${i}`)).join('')}
+          ${row('Total earned income', money(t.earned), 'total')}
+          <div class="fsec">Passive income (your money works for you) ${tip('Income from assets — this is what counts toward the freedom meter. Real estate and businesses are shown after their own expenses and loan payments.')}</div>
+          ${st.passive.length ? st.passive.map((g) => stmtGroup(g, 1, g.id)).join('') : '<div class="frow sub muted"><span>No passive income yet — buy an asset that pays you every month.</span></div>'}
+          ${t.compounding > 0.5 ? `<div class="frow sub muted"><span>Also growing inside compounding CDs (not counted until they mature)</span><span class="num">+${money(t.compounding)}</span></div>` : ''}
+          ${row('Total passive income', signed(t.passive), `total ${toneOf(t.passive)}`)}
+          ${row('Total income', money(t.income), 'big')}
+          <h4>Where your income comes from</h4>${allocationBar(incomeParts.filter((x) => x.value > 0)) || '<p class="muted small">No income this month.</p>'}
+        </div>
+        <div class="card statement-card"><h3>📤 Income statement — money out</h3>
+          ${st.expenses.map((g) => stmtGroup(g, -1, g.id)).join('')}
+          ${row('Total expenses', money(t.expenses), 'total')}
+          <div class="frow big"><span>Net monthly cashflow</span><span class="num ${toneOf(t.cashflow)}">${signed(t.cashflow)}</span></div>
+          <h4>Where your money goes ${tip(C.isMarried(p) ? 'Your share, after your spouse pays half of the household bills and the home mortgage.' : 'Each slice is a share of your total monthly expenses.')}</h4>
+          ${allocationBar(expenseParts) || '<p class="muted small">No expenses.</p>'}
+          ${s.debt > 0 ? `<div class="lesson sm">💡 Of your ${money(s.debt)}/mo of debt payments, <b>${money(debtInterest)}</b> is interest — the true cost of borrowing — and <b>${money(debtPrincipal)}</b> pays down what you owe. As a loan shrinks, more of each payment goes to principal.${t.assetLoanInterest > 0.5 ? ` Your investment loans add another ${money(t.assetLoanInterest)}/mo of interest, already taken out of those assets' cashflow above.` : ''}</div>` : ''}
+        </div>
+      </div>
+      <div class="grid-2 fin-grid">
+        <div class="card"><h3>⚖️ Balance sheet</h3>
+          <div class="fsec">Assets (what you own)</div>${assets}${row('Total assets', money(t.assets), 'total')}
+          <div class="fsec">Liabilities (what you owe)</div>${liabs}${row('Total liabilities', money(t.liabilities), 'total')}
+          <div class="frow big"><span>Net worth ${tip('Assets minus liabilities. Your home counts toward net worth, but not toward passive income — it doesn\'t pay you rent.')}</span><span class="num ${toneOf(t.netWorth)}">${money(t.netWorth)}</span></div>
+        </div>
+        <div class="card"><h3>🗓️ Since the game began</h3>
+          <div class="kv-grid one-col">${life.map(([l, v, c]) => kv(esc(l), v, c)).join('')}</div>
+        </div>
+      </div>
+      <div class="card"><h3>📉 Income vs. expenses over time</h3>${chart}
+        <p class="small muted">You're financially free when the green passive-income line climbs to ${fmtMult(mult())} the expenses line. Two levers: push passive income up, and push expenses down.</p></div>
+      <div class="lesson">💡 <b>Reading your statements.</b> Wealthy people and companies watch both. The income statement shows whether you're getting ahead each month; the balance sheet shows what all those months have added up to. Buying an asset moves cash into something that pays you; buying a liability (a car loan, a credit-card splurge) adds a monthly expense. <a href="learn.html#statements" target="_blank" rel="noopener">Learn more about financial statements →</a></div>`;
   }
 
   // ---------------------------------------------------------------- Trade (multiplayer)
@@ -1218,6 +1468,7 @@
       ['🏁', 'Financial freedom', 'You are financially free when <b>passive income</b> — money that arrives whether or not you work — covers your expenses. This game asks for a safety margin of ' + fmtMult(mult()) + ' your expenses.',
         `Your passive income is ${money(s.passive)}/mo. Your goal is ${money(s.target)}/mo (${fmtMult(mult())} × ${money(s.expenses)} of expenses).`],
       ['💵', 'Cashflow', 'Income minus expenses each month. Positive cashflow is the fuel you invest; negative cashflow drains your savings.', `Your monthly cashflow is ${signed(s.cashflow)}.`],
+      ['🧾', 'Financial statements', 'An <b>income statement</b> lists every dollar that comes in and goes out each month; a <b>balance sheet</b> lists what you own and what you owe. Reading both tells you whether you\'re getting ahead — and why. Your savings rate (cashflow ÷ income) is one of the most important numbers in personal finance.', `You keep ${pct(s.income > 0 ? s.cashflow / s.income : 0, 0)} of your income. See every line in the Financials tab.`],
       ['⚖️', 'Assets vs. liabilities', 'An asset puts money in your pocket every month (rentals, dividend stocks, businesses). A liability takes money out (car loans, credit cards, a boat). Wealth comes from buying assets, not liabilities.', `You own ${money(s.assets)} of assets and owe ${money(s.liabilities)}.`],
       ['❄️', 'Compound growth', 'When investment income is reinvested, it earns income of its own — a snowball. <b>Rule of 72:</b> divide 72 by your yearly return to see how many years your money takes to double (72 ÷ 8% = 9 years).', `Investing ${money(monthly)} a month at 10% a year grows to about ${money(fv(10))} in 10 years and ${money(fv(20))} in 20.`],
       ['💳', 'Interest & APR', 'APR is the yearly interest rate on a debt. Credit cards (20–28%) are some of the most expensive money you can borrow. Paying off a 25% card is like earning a guaranteed 25% return.', worst ? `Your most expensive debt is your ${worst.name} at ${worst.apr.toFixed(1)}% — about ${money(worst.balance * worst.apr / 1200)} of interest this month alone.` : 'You have no personal debt — nice!'],
@@ -1229,8 +1480,10 @@
       ['🗽', 'Index funds', 'An index fund owns a slice of hundreds of companies at once with very low fees. Over long periods, most professional stock-pickers fail to beat a simple index fund.', ''],
       ['💸', 'Dividends & yield', 'Dividends are profits a company pays its shareholders. Yield = yearly dividends ÷ price. Healthy companies raise dividends over time, so your income grows even if you never buy another share.', `${sec.keyr.name} yields ${pct(keyrYield)}: every $10,000 invested pays about ${money(10000 * keyrYield / 12)}/mo.`],
       ['🏛️', 'Interest rates & bonds', 'When interest rates rise, older bonds paying lower rates lose value. A bond fund with a "duration" of 6 falls about 6% for every 1-point rise in rates — but its future payouts rise.', `The central bank rate is ${S.market.rate.toFixed(2)}%; a typical 30-year mortgage costs about ${M.baseMortgageRate(S).toFixed(2)}%.`],
+      ['🏦', 'CDs & safe savings', 'A <b>certificate of deposit</b> locks your money up for a set term at a fixed, insured rate. <b>APY</b> includes interest on interest. Longer terms usually pay more — unless the yield curve is inverted. Breaking a CD early costs months of interest, and rates differ a lot between banks, so shop around.', (() => { const b = SV.bestOffer(S, 12); return b ? `The best 12-month CD right now pays ${b.apy.toFixed(2)}% APY: ${money(10000 * SV.monthlyRate(b.apy))}/mo for every $10,000.${s.cdValue ? ` You have ${money(s.cdValue)} in CDs.` : ''}` : ''; })()],
       ['🛟', 'Emergency fund', 'Keep 3–6 months of expenses in cash. It turns a layoff or a surprise bill into an inconvenience instead of a credit-card disaster.', `You have ${months.toFixed(1)} months of expenses in cash.`],
       ['📈', 'Lifestyle creep', 'As income rises, spending tends to rise with it — which is why some people with big salaries are still broke. Keeping expenses steady while income grows is a superpower.', `You've spent ${money(p.stats.luxurySpent)} on luxuries this game. Each $100/mo you cut lowers your freedom target by ${money(100 * mult())}/mo.`],
+      ['😨', 'Fear & greed', 'Markets are moved by emotion as well as facts. When prices rise, greed and the fear of missing out pull in more buyers; when they fall, fear turns into panic-selling. The <b>Fear & Greed index</b> measures that mood from 0 to 100. Mood-driven moves tend to reverse, which is why investors say "be fearful when others are greedy, and greedy when others are fearful."', (() => { const f = fng(); return `Right now the index reads ${f.value}: ${f.label.toLowerCase()}.`; })()],
       ['🔄', 'Economic cycles', 'Economies alternate between expansions and recessions. Recessions bring layoffs and falling prices — but also bargains for people with cash ready.', `Right now the economy is ${ec.label.toLowerCase()}: ${ec.desc}`],
       ['🎯', 'Options', 'An option is a contract: a <b>call</b> gives the right to buy 100 shares at a set "strike" price before it expires; a <b>put</b> gives the right to sell. A small premium controls a lot of stock, so options are leverage. Their price depends on the stock price, the strike, the time left and — most of all — volatility (the Black–Scholes formula).', `A 3-month at-the-money call on ${sec.idx.name} costs about ${money(O.quote(S, 'idx', 'call', O.strikes(sec.idx)[2], 3).ask * 100)} per contract right now.`],
       ['🔻', 'Short selling', 'Shorting means borrowing shares, selling them, and buying them back later — profiting if the price falls. Because a price can rise without limit, so can a short seller\'s losses. Brokers demand collateral and issue margin calls when a short goes against you.', ''],
@@ -1239,8 +1492,17 @@
       ['💞', 'Money & relationships', 'Couples who share a household split rent, utilities and groceries — a big financial advantage. But weddings, children and especially divorce are some of life\'s biggest expenses, and money stress is a leading cause of breakups. Talk about money early.', p.relationship.status === 'married' ? `Your spouse covers ${money(s.partner)}/mo of household bills.` : ''],
       ['🎰', 'Speculation vs. investing', 'Investing means buying something for the income or value it produces. Speculating means betting on a price move — crypto, penny stocks, hot tips. Speculation can pay off, but it isn\'t a plan.', '']
     ];
-    return `<div class="card"><h3>🎓 Money lessons</h3><p class="muted">The ideas behind the game, with your own numbers plugged in.</p></div>
-      <div class="learn-grid">${topics.map(([icon, title, body, you]) => `<div class="card learn-card"><h4>${icon} ${title}</h4><p>${body}</p>${you ? `<p class="you">👉 ${esc(you)}</p>` : ''}</div>`).join('')}</div>`;
+    const anchors = {
+      'Financial freedom': 'freedom', 'Cashflow': 'cashflow', 'Financial statements': 'statements', 'Assets vs. liabilities': 'assets', 'Compound growth': 'compound',
+      'Interest & APR': 'interest', 'Good debt vs. bad debt': 'good-debt', 'Leverage': 'leverage', 'Judging a deal': 'deals', 'Volatility & risk': 'volatility',
+      'Diversification': 'diversification', 'Index funds': 'index-funds', 'Dividends & yield': 'dividends', 'Interest rates & bonds': 'bonds', 'CDs & safe savings': 'cds',
+      'Emergency fund': 'emergency-fund', 'Lifestyle creep': 'lifestyle-creep', 'Fear & greed': 'fear-greed', 'Economic cycles': 'cycles', 'Options': 'options',
+      'Short selling': 'shorting', 'Rent vs. buy': 'rent-vs-buy', 'Your earning power': 'earning-power', 'Money & relationships': 'relationships', 'Speculation vs. investing': 'speculation'
+    };
+    return `<div class="card learn-head"><div class="card-head"><h3>🎓 Money lessons</h3>
+        <a class="btn primary" href="learn.html" target="_blank" rel="noopener">📚 Open the in-depth guide ↗</a></div>
+        <p class="muted">The ideas behind the game, with your own numbers plugged in. Want to dig deeper? The <a href="learn.html" target="_blank" rel="noopener">in-depth guide</a> explains every idea step by step, with worked examples, calculators and a glossary of terms — it opens in a new tab, so your game stays right here.</p></div>
+      <div class="learn-grid">${topics.map(([icon, title, body, you]) => `<div class="card learn-card"><h4>${icon} ${title}</h4><p>${body}</p>${you ? `<p class="you">👉 ${esc(you)}</p>` : ''}${anchors[title] ? `<a class="more" href="learn.html#${anchors[title]}" target="_blank" rel="noopener">Read more →</a>` : ''}</div>`).join('')}</div>`;
   }
 
   // ---------------------------------------------------------------- Log
@@ -1444,7 +1706,10 @@
           <li><b>Stocks</b> — 12 fictional investments, from a steady index fund and bonds to big tech, AI, healthcare, a grocery chain, energy, a REIT, gold, crypto and a penny stock. Each has its own volatility, and only dividends count as passive income.</li>
           <li><b>Real estate</b> — condos, houses, duplexes, triplexes and fourplexes, apartment complexes, vacation rentals, fixer-uppers, commercial buildings and land. Most use a mortgage; check the cashflow after all costs.</li>
           <li><b>Businesses</b> — vending routes, ATMs, food trucks, laundromats, franchises, partnerships and more. Some take a few turns to launch before you see their real profit.</li>
-          <li><b>Side projects, startups, lending notes and collectibles</b> — from cheap lottery tickets to steady interest.</li></ul>
+          <li><b>Side projects, startups, lending notes and collectibles</b> — from cheap lottery tickets to steady interest.</li>
+          <li><b>CDs</b> — in the Savings &amp; CDs tab, lock cash up for 3 months to 5 years at a fixed, insured rate. Rates follow the central bank, vary by bank and by term, and change every month. Take the interest monthly (it counts as passive income) or let it compound; cashing out early costs 3–12 months of interest.</li></ul>
+        <h3>😨 Fear &amp; Greed</h3><p>Investor mood swings between <b>extreme fear</b> and <b>extreme greed</b> (the index in the top bar, 0–100). Rising prices and exciting news make investors greedy: stocks — crypto and speculative names most of all — get an extra push up and the market calms down, but bubbles and crashes become more likely. Falling prices and scary news make them fearful: stocks get pushed down, bonds and gold get bid up and swings get bigger. Moves driven by mood alone fade over the following months.</p>
+        <h3>🧾 Financials</h3><p>The Financials tab is your personal income statement and balance sheet: every source of income (salary, each rental, business, dividend, note and CD), every expense (living costs, family, and each debt payment split into interest and principal), what you own and owe, and how it has all changed over time.</p>
         <h3>🤝 Trading with other players</h3><p>In a game with more than one player, the <b>Trade</b> tab lets you offer a deal to anyone still in the race: put in any mix of your rentals, land, businesses, startup stakes, lending notes, collectibles, shares of stock and cash, ask for any of theirs, and set the price yourselves. Any mortgage or loan on an asset goes with it. A person accepts or declines on the shared device; a computer opponent answers right away and only says yes to trades that leave it better off.</p>
         <h3>🏡 Your home</h3><p>Everyone starts as a renter. Homes rise and fall in value with the regional housing market <i>and</i> their own neighborhood. Buy one of the homes listed each turn in the Portfolio tab; homeowners can later sell (6% selling costs, then the mortgage is repaid) and move back into a rental. Buying needs a down payment (5–20%) plus 3% closing costs, and the bank caps all your debt payments at 43% of your income.</p>
         <h3>📈 Raises &amp; 🤝 networking</h3><p>Raises are small, permanent bumps in pay (2–5%); promotions are bigger (8–20%) and come with a new title. Networking conferences (a one-time fee, helps for 12 months) and networking clubs (a joining fee plus monthly dues, cancel any time) make raises, promotions and side gigs more likely and cut the longest possible job search after a layoff from 6 months to 4 (one of them) or 2 (both).</p>
@@ -1654,6 +1919,27 @@
     'finish-game'() { E.finishGame(S); ui.modal = null; save(); refresh(); },
     tab(el) { ui.tab = el.dataset.tab; refresh(); },
     toggle(el) { ui.expand[el.dataset.key] = !ui.expand[el.dataset.key]; refresh(); },
+    'toggle-fs'(el) { ui.expand[el.dataset.key] = ui.expand[el.dataset.key] === false; refresh(); },
+    'cd-pick'(el) { ui.cd.id = el.dataset.id; refresh(); },
+    'cd-max'() {
+      const input = document.getElementById('cd-amt');
+      if (input) { input.value = Math.floor(C.currentPlayer(S).cash); ui.cd.amount = input.value; updateCdProjection(); input.focus(); }
+    },
+    'open-cd'() {
+      const amt = qtyValue('cd-amt');
+      const r = E.openCD(S, ui.cd.id, amt, ui.cd.payout);
+      if (r.ok) ui.cd.amount = '';
+      after(r);
+    },
+    'break-cd'(el) {
+      const p = C.currentPlayer(S);
+      const cd = (p.cds || []).find((x) => x.id === el.dataset.id);
+      if (!cd) return;
+      const w = SV.earlyWithdrawal(cd);
+      confirmModal('Cash out this CD early?', `<div class="kv-grid">${kv('CD value now', money(w.value))}${kv(`Penalty (${w.months} months of interest)`, `−${money(w.penalty)}`, 'neg')}${kv('You receive', money(w.net), 'strong')}${cd.payout === 'monthly' ? kv('Monthly interest lost', signed(-SV.cdMonthlyInterest(cd))) : ''}${kv('Months it had left', String(cd.monthsLeft))}</div>
+        <p class="muted small">If you wait ${plural(cd.monthsLeft, 'month')}, you get ${money(SV.maturityValue(cd))} back with no penalty.</p>`, 'Cash out early', () => after(E.breakCD(S, cd.id)), 'bad');
+      refresh();
+    },
     choose(el) {
       const r = E.resolveCard(S, el.dataset.card, el.dataset.choice);
       if (r.ok) {
@@ -1856,9 +2142,19 @@
     return true;
   }
 
+  /** Recalculate the CD order ticket's projection in place (no re-render, so focus stays put). */
+  function updateCdProjection() {
+    const o = SV.offers(S).find((x) => x.id === ui.cd.id);
+    if (!o) return;
+    const proj = SV.project(o, Number(ui.cd.amount) || 0, ui.cd.payout);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = money(v); };
+    set('cd-proj-monthly', proj.monthly); set('cd-proj-maturity', proj.atMaturity); set('cd-proj-interest', proj.interest);
+  }
+
   document.addEventListener('input', (e) => {
     const t = e.target;
     if (tradeInput(t)) return;
+    if (t.dataset && t.dataset.cd === 'amount') { ui.cd.amount = t.value; updateCdProjection(); return; }
     if (t.id === 'opt-contracts') {
       // Live-update the order ticket without re-rendering (so the Buy button keeps working).
       const n = Math.max(0, Math.floor(Number(t.value) || 0));
@@ -1879,6 +2175,7 @@
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (tradeInput(t)) return;
+    if (t.dataset && t.dataset.cd === 'payout') { ui.cd.payout = t.value; updateCdProjection(); return; }
     if (t.dataset.setup) { ui.setup[t.dataset.setup] = t.type === 'checkbox' ? t.checked : t.value; saveSetup(); }
     if (t.classList.contains('ptype')) {
       const i = Number(t.dataset.i), pl = ui.setup.players[i];
@@ -1922,7 +2219,7 @@
     }
     if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('qty')) {
       const btn = e.target.id === 'opt-contracts' ? document.getElementById('opt-buy')
-        : e.target.parentElement.querySelector('[data-action="buy"], [data-action="pay-debt"], [data-action="pay-asset"], [data-action="borrow"], [data-action="short-sell"], [data-action="cover"]');
+        : e.target.parentElement.querySelector('[data-action="buy"], [data-action="open-cd"], [data-action="pay-debt"], [data-action="pay-asset"], [data-action="borrow"], [data-action="short-sell"], [data-action="cover"]');
       if (btn) btn.click();
     }
   });

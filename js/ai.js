@@ -4,9 +4,10 @@
  *
  * Three difficulty levels, each a recognizable money personality:
  *   easy   — "The Spender": thin savings, pays minimums, chases hot tips and
- *            panic-sells, finances a big wedding. Rarely buys deals.
+ *            panic-sells (more so when the market is fearful, and it chases
+ *            more when the market is greedy), finances a big wedding. Rarely buys deals.
  *   normal — "The Steady Saver": buys deals with solid cashflow, kills
- *            high-interest debt, parks extra cash in an index fund.
+ *            high-interest debt, parks extra cash in an index fund and CDs.
  *   hard   — "The Investor": pays off anything above 7% APR, sells stocks or
  *            borrows to fund strong deals, trims a pricey lifestyle, and invests
  *            spare cash in dividend payers so idle money earns passive income.
@@ -30,7 +31,7 @@
     },
     normal: {
       label: 'Normal', name: 'The Steady Saver',
-      desc: 'Buys deals with solid cashflow, pays off high-interest debt and keeps extra cash in an index fund.',
+      desc: 'Buys deals with solid cashflow, pays off high-interest debt and keeps extra cash in an index fund and CDs.',
       reserveMonths: 1, dealRoi: 0.15, dealChance: 1, borrow: true, sellForDeals: false,
       payDebtApr: 10, invest: 'index', creditLuxury: 0, donate: 1, conference: 1,
       club: false, dateChance: 0.9, wedding: 'simple', maxKids: 2
@@ -207,15 +208,19 @@
     const secs = state.market.securities;
     const s = C().summarize(state, p);
     if (L.invest === 'speculate') {
+      // The spender follows the crowd: fear makes it sell sooner, greed makes it chase.
+      const mood = MMS.Market.sentimentMood(MMS.Market.sentiment(state)).id;
+      const scared = mood === 'xfear' || mood === 'fear';
+      const greedy = mood === 'xgreed' || mood === 'greed';
       // Panic-sell big losers…
       for (const [id, h] of Object.entries(p.holdings)) {
         const sec = secs[id];
-        if (h.shares * sec.price < h.costBasis * 0.75 && rng.chance(0.6)) {
-          act(E().sellStock(state, id, h.shares), `Panic-sold ${sec.ticker} at a loss`, 'bad');
+        if (h.shares * sec.price < h.costBasis * (scared ? 0.85 : 0.75) && rng.chance(scared ? 0.85 : 0.6)) {
+          act(E().sellStock(state, id, h.shares), scared ? `Panic-sold ${sec.ticker} at a loss as fear swept the market` : `Panic-sold ${sec.ticker} at a loss`, 'bad');
         }
       }
       // …and chase something exciting now and then.
-      if (rng.chance(0.15)) {
+      if (rng.chance(greedy ? 0.35 : 0.15)) {
         const sec = secs[rng.pick(SPECULATIVE)];
         const shares = Math.floor((p.cash - reserve()) * 0.25 / sec.price);
         if (sec && !sec.delisted && shares >= 1) act(E().buyStock(state, sec.id, shares), `Bought ${shares.toLocaleString('en-US')} ${sec.ticker} hoping for a quick win`, 'bad');
@@ -227,6 +232,12 @@
       const sec = secs.idx;
       const shares = Math.floor(spare * 0.5 / sec.price);
       if (shares >= 1) act(E().buyStock(state, 'idx', shares), `Invested ${C().money(shares * sec.price)} in ${sec.ticker}`, 'good');
+      // The saver also locks some spare cash into a 12-month CD when rates are decent.
+      const cd = MMS.Savings.bestOffer(state, 12);
+      const amt = Math.floor(spare * 0.3 / 100) * 100;
+      if (cd && cd.apy >= 3 && amt >= cd.min) {
+        act(E().openCD(state, cd.id, amt, 'monthly'), `Opened a 12-month CD: ${C().money(amt)} at ${cd.apy.toFixed(2)}%`, 'good');
+      }
       return;
     }
     // income: keep ~3 months of expenses, invest the rest in dividend payers.

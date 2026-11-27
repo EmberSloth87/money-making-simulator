@@ -497,6 +497,7 @@
     const r = p.relationship;
     const name = r.partner.name;
     const text = rng.pick(D().BREAKUP_STORIES).replace(/\{name\}/g, name);
+    const cdSplit = MMS.Savings ? MMS.Savings.splitCDs(p) : 0;
     Object.assign(r, { status: 'single', partner: null, datingCost: 0, declined: 0, since: state.round });
     r.breakups++;
     log(state, `${p.name} and ${name} broke up.`, 'bad', p.id);
@@ -553,7 +554,7 @@
     const stressed = moneyStress(state, p);
     return card(state, {
       type: 'divorce', icon: '💔', tone: 'bad', required: true, title: `Trouble with ${r.partner.name}`,
-      text: `${stressed ? 'Money worries have led to constant arguments' : 'You and ' + r.partner.name + ' have grown apart'}, and ${r.partner.name} has mentioned divorce. Couples counseling costs about ${money(counseling)} and saves many marriages. A divorce would cost about ${money(legal)} in legal fees, and your ex would receive half of your cash and half of your stocks. You'd also go back to paying the household bills alone.`,
+      text: `${stressed ? 'Money worries have led to constant arguments' : 'You and ' + r.partner.name + ' have grown apart'}, and ${r.partner.name} has mentioned divorce. Couples counseling costs about ${money(counseling)} and saves many marriages. A divorce would cost about ${money(legal)} in legal fees, and your ex would receive half of your cash, stocks and CDs. You'd also go back to paying the household bills alone.`,
       data: { counseling, legal, counselWorks: rng.chance(0.65) },
       choices: [{ id: 'counsel', label: `Try couples counseling (${money(counseling)})`, style: 'primary' }, { id: 'divorce', label: 'Agree to divorce' }],
       lesson: 'Money fights are one of the most common reasons couples split. Talking openly about budgets, debt and goals — before they become a crisis — protects your relationship and your finances.'
@@ -618,11 +619,12 @@
       h.shares -= give;
       if (h.shares <= 0) delete p.holdings[id];
     }
+    const cdSplit = MMS.Savings ? MMS.Savings.splitCDs(p) : 0;
     Object.assign(r, { status: 'single', partner: null, datingCost: 0, declined: 0, since: state.round });
     scaleHousehold(p, 1 / HOUSEHOLD_SCALE);
     r.divorces++;
     log(state, `${p.name} and ${name} divorced.`, 'bad', p.id);
-    return `Divorced. Legal fees ${money(legal)}; ${name} received ${money(cashSplit)} in cash${stockSplit ? ` and ${money(stockSplit)} of stock` : ''}.${p.children ? ' You share custody and keep paying half of the children\'s costs.' : ''}`;
+    return `Divorced. Legal fees ${money(legal)}; ${name} received ${money(cashSplit)} in cash${stockSplit ? `, ${money(stockSplit)} of stock` : ''}${cdSplit ? `, half of your CDs (${money(cdSplit)})` : ''}.${p.children ? ' You share custody and keep paying half of the children\'s costs.' : ''}`;
   }
 
   /** Turn a payday highlight (startup exit, business closure, option expiry) into a pop-up card. */

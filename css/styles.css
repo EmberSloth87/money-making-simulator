@@ -444,3 +444,38 @@ label.trade-item:hover { background: var(--raised-2); }
 .trade-sides { margin-bottom: 8px; }
 .trade-sides h4 { margin-top: 0; }
 .handoff-note { border-left: 3px solid var(--pc); background: var(--raised); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+
+/* Fear & Greed gauge */
+.fng-gauge { margin: 6px 0 12px; }
+.fng-bar { position: relative; height: 12px; border-radius: 6px; margin: 26px 0 4px;
+  background: linear-gradient(90deg, #d03b3b 0%, #e07b39 25%, #6f6e69 45%, #6f6e69 55%, #5cb85c 75%, #0ca30c 100%); }
+.fng-needle { position: absolute; top: -6px; width: 4px; height: 24px; margin-left: -2px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--surface); }
+.fng-needle b { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); font-size: 13px; font-variant-numeric: tabular-nums; background: var(--raised-2); padding: 0 6px; border-radius: 6px; }
+.fng-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); gap: 4px; }
+.fng-labels span { flex: 1; text-align: center; }
+.fng-labels span:first-child { text-align: left; }
+.fng-labels span:last-child { text-align: right; }
+.fng-grid { margin-bottom: 0; }
+
+/* CD rate board */
+.cd-board td, .cd-board th { white-space: nowrap; }
+.cd-cell { appearance: none; font: inherit; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); cursor: pointer;
+  background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; min-width: 72px; }
+.cd-cell:hover { background: var(--raised-2); }
+.cd-cell.best { color: var(--good-text); }
+.cd-cell.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.cd-board tr.promo td { background: rgba(250, 178, 25, .06); }
+.cd-ticket .opt.check { margin: 6px 0; }
+.cd-proj { margin-top: 10px; }
+
+/* Financials */
+.fin-grid { align-items: start; }
+.statement-card .frow.sub .muted.small { font-size: 12px; }
+.kv-grid.one-col { grid-template-columns: 1fr; }
+.linkish { appearance: none; background: none; border: 0; padding: 0; font: inherit; color: var(--blue); cursor: pointer; text-decoration: underline; }
+
+/* Learn */
+.learn-card { display: flex; flex-direction: column; }
+.learn-card .more { margin-top: 10px; font-size: 13.5px; font-weight: 600; text-decoration: none; align-self: flex-start; }
+.learn-card .more:hover { text-decoration: underline; }
+a.btn { text-decoration: none; display: inline-block; }

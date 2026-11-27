@@ -13,6 +13,10 @@
  *   • bond and REIT prices fall when interest rates rise (duration)
  *   • companies report quarterly earnings surprises
  *   • dividends grow over time and the bond fund's payout tracks interest rates
+ *   • a Fear & Greed index (0–100) captures investors' mood: greed makes the herd chase
+ *     prices higher (and calms volatility), fear makes it dump stocks for bonds and gold
+ *     (and makes every swing bigger). Moves driven purely by mood fade over the following
+ *     months, so extreme greed tends to precede weak returns and extreme fear strong ones.
  */
 (function (global) {
   'use strict';
@@ -49,6 +53,83 @@
     oil_spike: 'Energy prices ripple through the economy: energy companies win, while everyone else pays more.',
     recession_warning: 'Markets move on expectations. Prices often fall before a recession officially begins.'
   };
+
+  // ------------------------------------------------------------------ Fear & Greed
+  // Mood leans a little greedy in booms and fearful in recessions, but it is driven mostly by
+  // recent price moves and scary (or exciting) news.
+  const SENT_BIAS = { boom: 3, stable: 2, recession: -3 };
+  const SENT_TILT = 0.03;     // monthly herd push at the very extremes (±3% for a beta-1 stock)
+  const SENT_REVERT = 0.25;   // share of the mood-driven "froth" that unwinds each month
+  // Tuned so that, as in real markets, the year after extreme fear has tended to be better for
+  // stocks than the year after extreme greed, while long-run average returns are unchanged.
+  const MOODS = [
+    { max: 25, id: 'xfear', label: 'Extreme fear', icon: '😱', tone: 'bad',
+      desc: 'Investors are panicking: selling stocks at almost any price and piling into bonds and gold. Swings are bigger than usual. Historically, extreme fear has often been a better time to buy than to sell — prices pushed down by panic tend to bounce back.' },
+    { max: 45, id: 'fear', label: 'Fear', icon: '😨', tone: 'bad',
+      desc: 'Investors are nervous. Stocks lean lower, safe havens (bonds, gold) lean higher, and volatility is above normal.' },
+    { max: 56, id: 'neutral', label: 'Neutral', icon: '😐', tone: 'neutral',
+      desc: 'Neither fear nor greed is in charge. Prices mostly follow earnings, interest rates and the economy.' },
+    { max: 76, id: 'greed', label: 'Greed', icon: '😎', tone: 'good',
+      desc: 'Investors are confident. Rising prices pull in more buyers, so stocks (and especially crypto and speculative names) lean higher and the market feels calm.' },
+    { max: 101, id: 'xgreed', label: 'Extreme greed', icon: '🤑', tone: 'good',
+      desc: 'Euphoria: everyone is chasing hot stocks and crypto, and the market feels like it can only go up. Prices run ahead of profits, so the gains often fade later — and bubbles and crashes become more likely.' }
+  ];
+  const SENT_LESSONS = {
+    xfear: 'The Fear & Greed index has hit "extreme fear". Panic-selling locks in losses; long-term investors who keep buying when others are fearful have historically been rewarded. "Be greedy when others are fearful."',
+    xgreed: 'The Fear & Greed index has hit "extreme greed". When everyone is euphoric, prices often run ahead of real profits — this is when bubbles form. "Be fearful when others are greedy": it\'s a good time to check that you\'re diversified, not to bet the farm.'
+  };
+  const sentimentOf = (m) => (m.sentiment == null ? 50 : m.sentiment);
+  function sentimentMood(v) { return MOODS.find((x) => v < x.max) || MOODS[MOODS.length - 1]; }
+  /** Mood as a number from −1 (extreme fear) to +1 (extreme greed). */
+  const greed = (m) => (sentimentOf(m) - 50) / 50;
+  /** How strongly a security rides the mood: stocks by beta, crypto most, bonds and gold the other way. */
+  function sentExposure(s) {
+    if (s.equity) return s.beta;
+    if (s.crypto) return 2.2;
+    if (s.bond) return -0.3;
+    return s.cyc < 0 ? -0.5 : 0;
+  }
+
+  /**
+   * One month of mood. It drifts back toward its normal level for the economy, but this month's
+   * market return feeds it (rising prices breed greed, falling prices breed fear), and so do news
+   * shocks (`push`). Returns a headline when the market enters an extreme.
+   */
+  function stepSentiment(state, rng, push) {
+    const { clamp } = C();
+    const m = state.market;
+    const idx = m.securities.idx;
+    const ret = idx && idx.prevPrice ? Math.log(idx.price / idx.prevPrice) : 0;
+    const target = 50 + SENT_BIAS[m.economy];
+    const before = sentimentMood(sentimentOf(m));
+    const v = target + 0.72 * (sentimentOf(m) - target) + 180 * (ret - 0.006) + 7 * rng.normal() + (push || 0);
+    m.sentiment = clamp(v, 1, 99);
+    (m.sentimentHistory || (m.sentimentHistory = [])).push(Math.round(m.sentiment));
+    if (m.sentimentHistory.length > 120) m.sentimentHistory.shift();
+    const after = sentimentMood(m.sentiment);
+    if (after.id !== before.id && (after.id === 'xfear' || after.id === 'xgreed')) {
+      return {
+        text: after.id === 'xfear'
+          ? `😱 Extreme fear grips the market (Fear & Greed index: ${Math.round(m.sentiment)}). Investors are dumping stocks for bonds and gold.`
+          : `🤑 Extreme greed! Everyone is talking about stocks and crypto (Fear & Greed index: ${Math.round(m.sentiment)}).`,
+        tone: after.id === 'xfear' ? 'bad' : 'good',
+        lesson: SENT_LESSONS[after.id]
+      };
+    }
+    return null;
+  }
+
+  /** Weight multiplier for a news story given the mood: euphoria breeds bubbles and crashes, fear sends money to gold. */
+  function newsMoodWeight(state, n) {
+    const g = greed(state.market), gp = Math.max(0, g), fp = Math.max(0, -g);
+    switch (n.id) {
+      case 'market_crash': return 1 + 2 * gp * gp;
+      case 'ai_bubble': case 'crypto_crash': return 1 + gp;
+      case 'bull_rally': case 'crypto_rally': return 1 + 0.8 * gp;
+      case 'gold_rush': return 1 + 1.5 * fp;
+      default: return 1;
+    }
+  }
 
   const combine = (a, b) => (1 + (a || 0)) * (1 + b) - 1;
 
@@ -95,6 +176,9 @@
       rateHistory: [],
       economy: 'stable',
       fear: 1,
+      sentiment: 50,
+      sentimentHistory: [],
+      froth: 0,
       pendingShocks: [],
       pennyGeneration: 0,
       movers: []
@@ -108,6 +192,7 @@
         equity: !!s.equity, crypto: !!s.crypto, penny: !!s.penny, bond: !!s.bond,
         price, prevPrice: price, div: 0, v: 1, history: []
       };
+      m.securities[s.id].sent = sentExposure(m.securities[s.id]);
       calibrate(m.securities[s.id]);
       m.order.push(s.id);
     }
@@ -115,6 +200,7 @@
     // Warm up two years of price history so charts and statistics have data.
     for (let i = 0; i < 24; i++) {
       stepPrices(state, rng, {}, 0);
+      stepSentiment(state, rng, 0);
       m.rateHistory.push(m.rate);
     }
     for (const id of m.order) {
@@ -136,11 +222,16 @@
     const m = state.market;
     const zm = rng.normal();
     m.movers = [];
+    // Mood: this month's herd push, minus part of the froth built up by earlier mood swings.
+    const g = greed(m);
+    const sentMove = SENT_TILT * g - SENT_REVERT * (m.froth || 0);
+    m.froth = (m.froth || 0) + sentMove;
     for (const id of m.order) {
       const s = m.securities[id];
       const sigma = s.dvol * Math.sqrt(s.v) * fearImpact(state, s);
       const z = s.corr * zm + Math.sqrt(Math.max(0, 1 - s.corr * s.corr)) * rng.normal();
       let r = s.dDrift + ECON_DRIFT[m.economy] * s.cyc - (sigma * sigma) / 2 + sigma * z;
+      r += sentMove * (s.sent != null ? s.sent : sentExposure(s));
       // Fat tails: rare sudden jumps, more likely when fear is high (and more often down than up).
       let jumped = false;
       if (s.jump && rng.chance(s.jump * m.fear)) {
@@ -165,7 +256,9 @@
     if (shocks.__re) reR += Math.log(1 + shocks.__re);
     m.reIndex = m.reIndex * Math.exp(reR);
     // Fear gauge relaxes toward its normal level for the current economy.
-    m.fear = clamp(FEAR_TARGET[m.economy] + 0.7 * (m.fear - FEAR_TARGET[m.economy]), 0.7, 2.5);
+    // Greed calms the market (complacency); fear makes it jumpier.
+    const fearTarget = FEAR_TARGET[m.economy] - 0.12 * g;
+    m.fear = clamp(fearTarget + 0.7 * (m.fear - fearTarget), 0.7, 2.5);
   }
 
   function applyNews(state, rng, n, shocks, headlines) {
@@ -186,7 +279,10 @@
       m.rate = clamp(m.rate + d, 0.25, 9);
     }
     if (n.div) for (const id in n.div) m.securities[id].div *= 1 + n.div[id];
-    if (n.fear) m.fear = clamp(m.fear + n.fear, 0.7, 2.5);
+    if (n.fear) {
+      m.fear = clamp(m.fear + n.fear, 0.7, 2.5);
+      m.sentPush = (m.sentPush || 0) - 45 * n.fear;
+    }
     const penny = m.securities.penny;
     const text = n.text.replace('{rate}', m.rate.toFixed(2)).replace('{penny}', `${penny.name} (${penny.ticker})`);
     headlines.push({ text, tone: n.tone, lesson: NEWS_LESSONS[n.id] || '' });
@@ -220,7 +316,7 @@
     for (const [to, prob] of transitions) {
       if (x < prob) {
         headlines.push(econHeadline(to, m.economy));
-        if (to === 'recession') m.fear = clamp(m.fear + 0.4, 0.7, 2.5);
+        if (to === 'recession') { m.fear = clamp(m.fear + 0.4, 0.7, 2.5); m.sentPush = (m.sentPush || 0) - 15; }
         m.economy = to;
         break;
       }
@@ -229,11 +325,12 @@
 
     // 2. News
     const shocks = {};
+    m.sentPush = 0;
     const count = rng.chance(0.4) ? (rng.chance(0.2) ? 2 : 1) : 0;
     const used = new Set();
     for (let i = 0; i < count; i++) {
       const pool = D().NEWS.filter((n) => !used.has(n.id));
-      const n = rng.weighted(pool, (it) => it.w * ((it.econW && it.econW[m.economy]) || 1));
+      const n = rng.weighted(pool, (it) => it.w * ((it.econW && it.econW[m.economy]) || 1) * newsMoodWeight(state, it));
       used.add(n.id);
       applyNews(state, rng, n, shocks, headlines);
     }
@@ -282,6 +379,9 @@
 
     // 6. Prices (including the effect of any interest-rate change)
     stepPrices(state, rng, shocks, m.rate - rateBefore);
+    const moodHeadline = stepSentiment(state, rng, m.sentPush);
+    m.sentPush = 0;
+    if (moodHeadline) headlines.push(moodHeadline);
 
     // 7. Dividends: companies raise them slowly (not in recessions); bond payouts track rates.
     for (const id of m.order) {
@@ -382,7 +482,8 @@
   MMS.Market = {
     initMarket, update, calibrate, mortgageRate, baseMortgageRate, currentVol,
     annualVol, periodReturn, maxDrawdown, currentYield, riskLevel,
-    ECON_LABELS, NEWS_LESSONS
+    ECON_LABELS, NEWS_LESSONS, MOODS, sentimentMood, sentExposure, greed,
+    sentiment: (state) => sentimentOf(state.market)
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.Market;
 })(typeof window !== 'undefined' ? window : globalThis);

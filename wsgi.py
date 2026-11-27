@@ -2,7 +2,7 @@
 WSGI entry point for deploying Money Making Simulator behind any WSGI server.
 
 The game runs entirely in the browser, so this app only serves the static files
-(index.html, css/ and js/). It uses the Python standard library only.
+(index.html, the learning guide learn.html, css/ and js/). It uses the Python standard library only.
 
     gunicorn wsgi:application              # Linux / macOS
     waitress-serve --port=8080 wsgi:application   # Windows or anywhere
@@ -17,7 +17,7 @@ from email.utils import formatdate, parsedate_to_datetime
 
 ROOT = os.path.dirname(os.path.realpath(__file__))
 # Only these top-level entries are ever served: never server code, tests, .git, etc.
-PUBLIC = {'index.html', 'css', 'js'}
+PUBLIC = {'index.html', 'learn.html', 'css', 'js'}
 TYPES = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',

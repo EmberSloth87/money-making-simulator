@@ -23,7 +23,7 @@ const TYPES = {
   '.ico': 'image/x-icon',
   '.md': 'text/markdown; charset=utf-8'
 };
-const PUBLIC = new Set(['index.html', 'css', 'js']);
+const PUBLIC = new Set(['index.html', 'learn.html', 'css', 'js']);
 
 const server = http.createServer((req, res) => {
   let urlPath;

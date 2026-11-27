@@ -250,10 +250,12 @@
     const business = sum(p.businesses.filter((b) => b.kind === 'business'), businessCashflow);
     const side = sum(p.businesses.filter((b) => b.kind === 'side'), businessCashflow);
     const interest = sum(p.notes, noteIncome);
+    const Sv = MMS.Savings;
+    const cdInterest = Sv ? Sv.cdIncome(p) : 0;
     const collectibles = -sum(p.collectibles, (c) => c.upkeep || 0);
     const O = MMS.Options;
     const shortCarry = O ? -O.shortCarry(state, p) : 0;
-    const passive = dividends + realEstate + business + side + interest + collectibles + shortCarry;
+    const passive = dividends + realEstate + business + side + interest + cdInterest + collectibles + shortCarry;
     const living = livingExpenses(p);
     const partner = partnerShare(p);
     const children = childExpenses(p);
@@ -272,22 +274,160 @@
     const bizDebt = sum(p.businesses, (b) => (b.loan ? b.loan.balance : 0));
     const notesValue = sum(p.notes, (n) => n.principal);
     const collValue = sum(p.collectibles, (c) => c.value);
+    const cdValue = Sv ? Sv.cdsValue(p) : 0;
     const debtBalance = sum(p.debts, (d) => d.balance);
     const home = homeValue(state, p);
     const optionsValue = O ? sum(p.options || [], (o) => O.optionValue(state, o)) : 0;
     const shortCollateral = O ? O.shortCollateral(p) : 0;
     const shortLiability = O ? O.shortLiability(state, p) : 0;
-    const assets = p.cash + sv + propValue + bizValue + notesValue + collValue + home + optionsValue + shortCollateral;
+    const assets = p.cash + cdValue + sv + propValue + bizValue + notesValue + collValue + home + optionsValue + shortCollateral;
     const liabilities = debtBalance + propDebt + bizDebt + shortLiability;
 
     return {
-      salary, gigs, dividends, realEstate, business, side, interest, collectibles, shortCarry, passive,
+      salary, gigs, dividends, realEstate, business, side, interest, cdInterest, collectibles, shortCarry, passive,
       living, partner, children, dating, dues, debt, expenses, income, cashflow, target,
       progress: target > 0 ? Math.max(0, passive) / target : 0,
       free: passive > 0 && passive >= target,
-      stocksValue: sv, propValue, propDebt, bizValue, bizDebt, notesValue, collValue, debtBalance, home,
+      stocksValue: sv, propValue, propDebt, bizValue, bizDebt, notesValue, collValue, cdValue, debtBalance, home,
       optionsValue, shortCollateral, shortLiability,
       assets, liabilities, netWorth: assets - liabilities
+    };
+  }
+
+  // ---------------------------------------------------------------- financial statement
+  /**
+   * A detailed monthly income statement plus a balance sheet. Every source of income and every
+   * expense is listed, in groups; the totals match summarize(). Items: { label, amount, detail }.
+   * Debt items also carry { interest, principal }: the part of the payment that is a true cost
+   * versus the part that pays the loan down.
+   */
+  function statement(state, p) {
+    const s = summarize(state, p);
+    const Dt = D(), O = MMS.Options, Sv = MMS.Savings;
+    const group = (id, label, items, total) => {
+      const list = items.filter(Boolean);
+      return { id, label, items: list, total: total != null ? total : sum(list, (i) => i.amount) };
+    };
+    const loanSplit = (loan) => {
+      if (!loan || loan.balance <= 0) return { interest: 0, principal: 0 };
+      const interest = Math.min(loan.payment, loan.balance * loan.apr / 1200);
+      return { interest, principal: Math.max(0, loan.payment - interest) };
+    };
+
+    // ---- earned income
+    const employment = p.retired ? 'Retired — financially free!' : isEmployed(p) ? jobTitle(p) : `Unemployed — ${p.unemployedTurns} more month${p.unemployedTurns === 1 ? '' : 's'} job hunting`;
+    const earned = [
+      group('salary', 'Salary', [{ label: employment, amount: s.salary }]),
+      group('gigs', 'Side gigs', p.sideGigs.map((g) => ({ label: g.title, amount: g.income, detail: `ends in ${g.turnsLeft} month${g.turnsLeft === 1 ? '' : 's'}` })))
+    ].filter((g) => g.id === 'salary' || g.items.length);
+
+    // ---- passive income
+    const props = p.properties.map((pr) => {
+      const renovating = pr.rehabLeft > 0;
+      const rent = renovating ? 0 : pr.rent;
+      const opex = renovating ? Math.round(pr.opex * 0.5) : pr.opex;
+      const mpay = pr.mortgage ? pr.mortgage.payment : 0;
+      const split = loanSplit(pr.mortgage);
+      const parts = [pr.land ? 'land (no rent)' : `rent ${money(rent)}${pr.str ? ' (varies)' : ''}`, `expenses −${money(opex)}`];
+      if (mpay) parts.push(`mortgage −${money(mpay)} (${money(split.interest)} interest)`);
+      if (renovating) parts.push('renovating');
+      return { label: `${pr.icon} ${pr.name}`, amount: propertyCashflow(pr), detail: parts.join(' · '), rent, opex, mortgage: mpay, interest: split.interest, principal: split.principal };
+    });
+    const bizItems = (kind) => p.businesses.filter((b) => b.kind === kind).map((b) => {
+      const pay = b.loan ? b.loan.payment : 0;
+      const split = loanSplit(b.loan);
+      const profit = businessProfit(b);
+      const detail = [b.rampLeft > 0 ? `launching (${b.rampLeft} mo)` : `profit ${money(profit)}`];
+      if (pay) detail.push(`loan −${money(pay)} (${money(split.interest)} interest)`);
+      return { label: `${b.icon} ${b.name}`, amount: businessCashflow(b), detail: detail.join(' · '), profit, loan: pay, interest: split.interest, principal: split.principal };
+    });
+    const divs = [];
+    for (const id in p.holdings) {
+      const sec = state.market.securities[id], h = p.holdings[id];
+      if (!sec || h.shares <= 0 || !(sec.div > 0)) continue;
+      divs.push({ label: `${sec.icon} ${sec.ticker} — ${sec.name}`, amount: h.shares * sec.div, detail: `${h.shares.toLocaleString('en-US')} shares × $${sec.div.toFixed(3)}/mo` });
+    }
+    const noteItems = p.notes.map((n) => ({ label: `${n.icon} ${n.name}`, amount: noteIncome(n), detail: `${money(n.principal)} at ${n.rate.toFixed(1)}% · ${n.monthsLeft} mo left` }));
+    const cdItems = (p.cds || []).map((cd) => {
+      const monthly = Sv.cdMonthlyInterest(cd);
+      return {
+        label: `${cd.icon} ${Sv.termAdj(cd.term)} CD · ${cd.bankName}`,
+        amount: cd.payout === 'monthly' ? Math.round(monthly * 100) / 100 : 0,
+        detail: cd.payout === 'monthly' ? `${money(cd.principal)} at ${cd.apy.toFixed(2)}% APY · paid monthly` : `compounding: +${money(monthly)}/mo stays in the CD (not spendable, so it doesn't count yet)`,
+        accrual: cd.payout === 'monthly' ? 0 : monthly
+      };
+    });
+    const costs = [
+      ...p.collectibles.filter((c) => c.upkeep).map((c) => ({ label: `${c.icon} ${c.name} (storage & insurance)`, amount: -c.upkeep })),
+      s.shortCarry ? { label: 'Short positions (borrow fees & dividends owed)', amount: s.shortCarry } : null
+    ];
+    const passive = [
+      group('realestate', 'Real estate (net of expenses & mortgages)', props),
+      group('business', 'Businesses (net of loans)', bizItems('business')),
+      group('side', 'Side projects', bizItems('side')),
+      group('dividends', 'Dividends', divs),
+      group('notes', 'Interest — lending notes', noteItems),
+      group('cds', 'Interest — CDs', cdItems),
+      group('costs', 'Costs of holding investments', costs)
+    ].filter((g) => g.items.length);
+
+    // ---- expenses (positive amounts are money going out)
+    const living = Dt.EXPENSES.map((cat) => ({
+      label: cat.id === 'housing' ? (p.ownsHome ? 'Housing (taxes, insurance, upkeep)' : 'Housing (rent)') : cat.label,
+      amount: p.expenses[cat.id] || 0, category: cat.id
+    }));
+    if (s.partner) living.push({ label: `${p.relationship.partner.name} pays half the household bills`, amount: -s.partner, detail: 'half of living costs and the home mortgage' });
+    const family = [
+      s.children ? { label: `Children (${p.children})${p.childShare < 1 ? ' — your half' : ''}`, amount: s.children } : null,
+      s.dating ? { label: `Dating ${p.relationship.partner.name}`, amount: s.dating } : null,
+      s.dues ? { label: `${p.network.club.name} dues`, amount: s.dues } : null
+    ];
+    const debts = p.debts.slice().sort((a, b) => b.payment - a.payment).map((d) => {
+      const split = loanSplit(d);
+      return {
+        label: `${(Dt.DEBT_TYPES[d.type] || {}).icon || '💳'} ${d.name}`, amount: d.payment, type: d.type,
+        detail: `${money(split.interest)} interest + ${money(split.principal)} principal · ${d.apr.toFixed(2)}% APR`,
+        interest: split.interest, principal: split.principal
+      };
+    });
+    const expenses = [
+      group('living', 'Living expenses', living),
+      group('family', 'Family & social', family),
+      group('debt', 'Debt payments', debts)
+    ].filter((g) => g.items.length);
+
+    // ---- balance sheet
+    const homeLoan = homeMortgage(p);
+    const optionsNet = s.optionsValue + s.shortCollateral;
+    const assets = [
+      { label: 'Cash', amount: p.cash },
+      { label: 'CDs (principal + interest so far)', amount: s.cdValue },
+      { label: 'Stocks & funds', amount: s.stocksValue },
+      { label: 'Rental properties & land', amount: s.propValue },
+      { label: 'Businesses & startup stakes', amount: s.bizValue },
+      { label: 'Lending notes', amount: s.notesValue },
+      { label: 'Collectibles', amount: s.collValue },
+      { label: 'Your home', amount: s.home },
+      { label: 'Options & short-sale deposits', amount: optionsNet }
+    ].filter((a) => Math.abs(a.amount) >= 0.5 || a.label === 'Cash');
+    const liabilities = [
+      { label: 'Home mortgage', amount: homeLoan ? homeLoan.balance : 0 },
+      { label: 'Personal debts (cards, car, student, other)', amount: s.debtBalance - (homeLoan ? homeLoan.balance : 0) },
+      { label: 'Mortgages on rentals', amount: s.propDebt },
+      { label: 'Business loans', amount: s.bizDebt },
+      { label: 'Shares owed on short sales', amount: s.shortLiability }
+    ].filter((l) => Math.abs(l.amount) >= 0.5);
+
+    const debtInterest = sum(debts, (d) => d.interest);
+    const assetLoanInterest = sum(props, (x) => x.interest) + sum(p.businesses.filter((b) => b.loan), (b) => loanSplit(b.loan).interest);
+    return {
+      summary: s, earned, passive, expenses, assets, liabilities,
+      totals: {
+        earned: s.salary + s.gigs, passive: s.passive, income: s.income, expenses: s.expenses, cashflow: s.cashflow,
+        debtInterest, debtPrincipal: s.debt - debtInterest, assetLoanInterest,
+        compounding: sum(cdItems, (c) => c.accrual || 0),
+        assets: s.assets, liabilities: s.liabilities, netWorth: s.netWorth
+      }
     };
   }
 
@@ -310,7 +450,8 @@
   function newStats() {
     return {
       turns: 0, donated: 0, deals: 0, good: 0, bad: 0, timesDownsized: 0, promotions: 0, raises: 0, interestPaid: 0,
-      passiveEarned: 0, realizedGains: 0, luxurySpent: 0, weddingSpent: 0, datingSpent: 0, networkingSpent: 0, optionTrades: 0, trades: 0
+      passiveEarned: 0, realizedGains: 0, luxurySpent: 0, weddingSpent: 0, datingSpent: 0, networkingSpent: 0, optionTrades: 0, trades: 0,
+      cdInterest: 0, cdPenalties: 0
     };
   }
 
@@ -321,6 +462,7 @@
     if (!p.network) p.network = { club: null, conferenceTurns: 0, conferences: 0 };
     if (!Array.isArray(p.options)) p.options = [];
     if (!p.shorts) p.shorts = {};
+    if (!Array.isArray(p.cds)) p.cds = [];
     if (p.childShare == null) p.childShare = 1;
     if (p.bot === undefined) p.bot = null;
     p.stats = Object.assign(newStats(), p.stats);
@@ -381,6 +523,7 @@
       properties: [],
       businesses: [],
       notes: [],
+      cds: [],
       collectibles: [],
       sideGigs: [],
       unemployedTurns: 0,
@@ -645,6 +788,13 @@
     }
     add('Interest (notes)', interest);
 
+    if (MMS.Savings && p.cds && p.cds.length) {
+      const cd = MMS.Savings.settle(state, p, notes);
+      add('Interest (CDs)', cd.interest);
+      if (cd.matured) lines.push({ label: 'CDs matured (money returned)', amount: cd.matured });
+      p.cash += cd.matured;
+    }
+
     let upkeep = 0;
     for (const c of p.collectibles) {
       c.value = Math.max(50, Math.round(c.value * Math.exp(c.drift - (c.vol * c.vol) / 2 + c.vol * rng.normal())));
@@ -690,7 +840,10 @@
 
   function snapshot(state, p) {
     const s = summarize(state, p);
-    return { round: state.round, netWorth: Math.round(s.netWorth), passive: Math.round(s.passive), target: Math.round(s.target), cash: Math.round(p.cash), progress: s.progress };
+    return {
+      round: state.round, netWorth: Math.round(s.netWorth), passive: Math.round(s.passive), target: Math.round(s.target), cash: Math.round(p.cash), progress: s.progress,
+      income: Math.round(s.income), expenses: Math.round(s.expenses), cashflow: Math.round(s.cashflow)
+    };
   }
 
   MMS.Core = {
@@ -700,7 +853,7 @@
     revolvingPayment, addDebt, chargeCredit, processDebts,
     propertyValue, propertyCashflow, propertySale, businessProfit, businessCashflow, businessValue, businessSale, noteIncome, homeValue,
     homeMortgage, homeSale, relStatus, isMarried, networkLevel,
-    salaryIncome, gigIncome, dividendIncome, livingExpenses, partnerShare, childExpenses, datingCost, clubDues, debtPayments, stocksValue, summarize,
+    salaryIncome, gigIncome, dividendIncome, livingExpenses, partnerShare, childExpenses, datingCost, clubDues, debtPayments, stocksValue, summarize, statement,
     bankRate, loanLimit, addStudentLoans, createPlayer, migratePlayer, newRelationship, payday, snapshot, revealBusiness
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MMS.Core;

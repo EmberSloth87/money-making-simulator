@@ -36,7 +36,8 @@ class WsgiTest(unittest.TestCase):
         self.assertIn(b'js/trade.js', body)
 
     def test_scripts_and_styles_have_the_right_types(self):
-        for path, kind in [('/js/engine.js', 'text/javascript'), ('/css/styles.css', 'text/css'), ('/index.html', 'text/html')]:
+        for path, kind in [('/js/engine.js', 'text/javascript'), ('/js/savings.js', 'text/javascript'), ('/css/styles.css', 'text/css'),
+                           ('/index.html', 'text/html'), ('/learn.html', 'text/html')]:
             status, headers, body = call(path)
             self.assertEqual(status, 200, path)
             self.assertTrue(headers['Content-Type'].startswith(kind), path)
